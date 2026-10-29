@@ -96,6 +96,10 @@ The release workflow publishes:
 ghcr.io/blalange/netbox-inventory-toolkit:v0.1.0
 ```
 
+The release workflow tries to make the GHCR package public. If it remains
+private, either change the package visibility in the GitHub package settings or
+add an `imagePullSecrets` entry with a token that has `read:packages`.
+
 The image entrypoint is `netbox-inventory-toolkit` and the default command is
 `sync`. Mount the inventory at `/inventory`, images at `/images`, and a writable
 cache/media volume at `/media`:
