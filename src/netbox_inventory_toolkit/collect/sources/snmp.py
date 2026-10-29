@@ -48,8 +48,8 @@ log = get_logger(__name__)
 def _require_pysnmp() -> None:
     if not _PYSNMP_AVAILABLE:
         raise InventoryError(
-            "SNMP collection requires pysnmp. Run the collector with "
-            "--with pysnmp==7.1.22 or pass --no-snmp."
+            "SNMP collection requires the 'snmp' extra (pysnmp). "
+            "Install netbox-inventory-toolkit[snmp] or pass --no-snmp."
         )
 
 
