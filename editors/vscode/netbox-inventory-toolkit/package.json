@@ -2,7 +2,7 @@
   "name": "netbox-inventory-toolkit",
   "displayName": "NetBox inventory toolkit",
   "description": "Language support for NetBox inventory YAML files.",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "publisher": "blalange",
   "license": "MIT",
   "engines": {
@@ -41,7 +41,7 @@
           },
           "default": [
             "--from",
-            "netbox-inventory-toolkit[lsp] @ git+https://github.com/Blalange/netbox-inventory-toolkit@v0.1.2",
+            "netbox-inventory-toolkit[lsp] @ git+https://github.com/Blalange/netbox-inventory-toolkit@v0.1.5",
             "netbox-inventory-toolkit",
             "lsp"
           ],

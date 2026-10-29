@@ -1,3 +1,8 @@
 """NetBox inventory toolkit."""
 
-__version__ = "0.1.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("netbox-inventory-toolkit")
+except PackageNotFoundError:  # running from a source tree without installed metadata
+    __version__ = "0.1.5"

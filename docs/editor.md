@@ -33,7 +33,7 @@ Build and install the extension:
 cd editors/vscode/netbox-inventory-toolkit
 npm ci
 npm run package
-code --install-extension netbox-inventory-toolkit-0.1.0.vsix
+code --install-extension netbox-inventory-toolkit-0.1.5.vsix
 ```
 
 Settings:
@@ -41,7 +41,7 @@ Settings:
 | Setting | Default |
 |---|---|
 | `netboxInventory.server.command` | `uvx` |
-| `netboxInventory.server.args` | `--from "netbox-inventory-toolkit[lsp] @ git+…@v0.1.2" netbox-inventory-toolkit lsp` |
+| `netboxInventory.server.args` | `--from "netbox-inventory-toolkit[lsp] @ git+…@v0.1.5" netbox-inventory-toolkit lsp` |
 | `netboxInventory.server.cwd` | workspace root |
 | `netboxInventory.inventory` | `inventory` |
 
