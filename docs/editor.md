@@ -41,7 +41,7 @@ Settings:
 | Setting | Default |
 |---|---|
 | `netboxInventory.server.command` | `uvx` |
-| `netboxInventory.server.args` | `--from git+…@v0.1.2 netbox-inventory-toolkit lsp` |
+| `netboxInventory.server.args` | `--from "netbox-inventory-toolkit[lsp] @ git+…@v0.1.2" netbox-inventory-toolkit lsp` |
 | `netboxInventory.server.cwd` | workspace root |
 | `netboxInventory.inventory` | `inventory` |
 
