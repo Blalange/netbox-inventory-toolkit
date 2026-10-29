@@ -81,7 +81,7 @@ def _run_sources(ctx: CollectContext, selected: set[str], explicit: bool) -> Sou
             continue
         try:
             source.collect(ctx, state)
-        except InventoryError as exc:
+        except Exception as exc:  # noqa: BLE001 - auto mode must tolerate source outages
             if explicit:
                 raise
             log.warning("Source %s: skipped: %s", name, exc)
