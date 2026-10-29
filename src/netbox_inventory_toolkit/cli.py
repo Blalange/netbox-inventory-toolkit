@@ -11,6 +11,7 @@ usage: netbox-inventory-toolkit <command> [options]
 
 commands:
   collect   collect live source data into the generated inventory layer
+  discover  suggest manual device entries from inventory and network probes
   sync      reconcile the inventory into NetBox
   check     validate the inventory without contacting NetBox
   lsp       run the inventory language server (stdio)
@@ -32,6 +33,10 @@ def main(argv: list[str] | None = None) -> int:
         from .collect.cli import main as collect_main
 
         return collect_main(rest)
+    if command == "discover":
+        from .discover.cli import main as discover_main
+
+        return discover_main(rest)
     if command in {"sync", "check"}:
         from .sync.cli import main as sync_main
 

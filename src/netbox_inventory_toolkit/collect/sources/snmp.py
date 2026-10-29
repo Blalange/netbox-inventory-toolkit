@@ -327,6 +327,50 @@ async def _poll_target(
         engine.close_dispatcher()
 
 
+async def probe_snmp(
+    ip: str,
+    *,
+    community: str = "public",
+    timeout: float = 2.0,
+    retries: int = 1,
+) -> dict[str, Any] | None:
+    """Read only identity data from one SNMP endpoint."""
+    _require_pysnmp()
+    engine = SnmpEngine()
+    try:
+        auth = CommunityData(community, mpModel=1)
+        transport = await UdpTransportTarget.create(
+            (ip, 161), timeout=timeout, retries=retries
+        )
+        context = ContextData()
+        system: dict[str, str] = {}
+        for key, oid in SYSTEM_OIDS.items():
+            value = await _get(engine, auth, transport, context, oid)
+            if value is not None:
+                system[key] = value_text(value)
+        if not system.get("descr") and not system.get("name"):
+            return None
+        entity_values = await asyncio.gather(
+            *(_walk(engine, auth, transport, context, oid) for oid in ENTITY_OIDS.values())
+        )
+        entity_tables = dict(zip(ENTITY_OIDS.keys(), entity_values, strict=False))
+        serial = _first_text(
+            _table(entity_tables.get("serial", {}), ENTITY_OIDS["serial"])
+        )
+        model = _first_text(_table(entity_tables.get("model", {}), ENTITY_OIDS["model"]))
+        return {
+            "ip": ip,
+            "sys": system,
+            "serial": serial,
+            "model": model,
+        }
+    except Exception as exc:  # noqa: BLE001 - discovery probes are best effort
+        log.debug("SNMP probe %s failed: %s: %s", ip, type(exc).__name__, exc)
+        return None
+    finally:
+        engine.close_dispatcher()
+
+
 async def collect_snmp(
     targets: list[dict[str, Any]],
     *,

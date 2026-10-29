@@ -153,7 +153,13 @@ def parse_sdr(
     return list(fans.values()), list(psus.values())
 
 
-def _run(address: str, username: str, password: str, *args: str) -> str | None:
+def _run(
+    address: str,
+    username: str,
+    password: str,
+    *args: str,
+    timeout: float | None = None,
+) -> str | None:
     binary = shutil.which(IPMI_BINARY)
     if not binary:
         log.warning(
@@ -187,11 +193,15 @@ def _run(address: str, username: str, password: str, *args: str) -> str | None:
             check=False,
             capture_output=True,
             text=True,
-            timeout=IPMI_TIMEOUT,
+            timeout=timeout if timeout is not None else IPMI_TIMEOUT,
             env={**os.environ, "IPMI_PASSWORD": password},
         )
     except subprocess.TimeoutExpired:
-        log.warning("IPMI %s: ipmitool timed out after %.0fs", address, IPMI_TIMEOUT)
+        log.warning(
+            "IPMI %s: ipmitool timed out after %.0fs",
+            address,
+            timeout if timeout is not None else IPMI_TIMEOUT,
+        )
         return None
     except OSError as exc:
         log.warning("IPMI %s: cannot run ipmitool: %s", address, exc)
@@ -212,6 +222,25 @@ def _run(address: str, username: str, password: str, *args: str) -> str | None:
         )
         return None
     return result.stdout
+
+
+def probe_ipmi(
+    address: str,
+    username: str,
+    password: str,
+    *,
+    timeout: float | None = None,
+) -> dict[str, Any] | None:
+    """Read only FRU identity from an IPMI BMC."""
+    if not shutil.which(IPMI_BINARY):
+        return None
+    fru_text = _run(address, username, password, "fru", "print", timeout=timeout)
+    if fru_text is None:
+        return None
+    system = parse_fru(fru_text)
+    if not any(system.values()):
+        return None
+    return {"system": system}
 
 
 def read_ipmi(address: str, username: str, password: str) -> dict[str, Any] | None:

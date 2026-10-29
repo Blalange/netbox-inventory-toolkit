@@ -2,7 +2,7 @@
   "name": "netbox-inventory-toolkit",
   "displayName": "NetBox inventory toolkit",
   "description": "Language support for NetBox inventory YAML files.",
-  "version": "0.1.7",
+  "version": "0.2.0",
   "publisher": "blalange",
   "license": "MIT",
   "engines": {
@@ -43,7 +43,7 @@
             "--python",
             "3.13",
             "--from",
-            "netbox-inventory-toolkit[lsp]==0.1.7",
+            "netbox-inventory-toolkit[lsp]==0.2.0",
             "netbox-inventory-toolkit",
             "lsp"
           ],

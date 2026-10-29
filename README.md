@@ -21,7 +21,7 @@ without UniFi, and a manual-only inventory works without any live source.
 Use `uv` to run a pinned release without installing anything globally:
 
 ```sh
-uvx --python 3.13 --from "netbox-inventory-toolkit[all]==0.1.7" \
+uvx --python 3.13 --from "netbox-inventory-toolkit[all]==0.2.0" \
   netbox-inventory-toolkit --help
 ```
 
@@ -52,6 +52,8 @@ UniFi controller or Kubernetes cluster is required.
 ## Commands
 
 ```text
+netbox-inventory-toolkit discover --inventory inventory
+netbox-inventory-toolkit discover --inventory inventory --network 192.0.2.0/24 --protocols redfish,snmp
 netbox-inventory-toolkit collect --inventory inventory [--sources auto|all|none|list]
 netbox-inventory-toolkit sync --inventory inventory --check
 netbox-inventory-toolkit sync --inventory inventory --dry-run --prune
@@ -61,6 +63,10 @@ netbox-inventory-toolkit lsp --inventory inventory
 `--sources auto` enables a source only when its configuration and credentials
 are present. Explicitly selecting a source that is not configured is an error;
 `auto` and `all` skip it with a warning.
+
+`discover` scans the existing manual/generated inventory and can optionally
+probe Redfish, SNMP and IPMI endpoints. It prints suggested manual entries and
+never edits existing files. See [docs/discovery.md](docs/discovery.md).
 
 ## Optional sources
 
@@ -97,7 +103,7 @@ natural keys and provenance tags.
 The release workflow publishes:
 
 ```text
-ghcr.io/blalange/netbox-inventory-toolkit:v0.1.7
+ghcr.io/blalange/netbox-inventory-toolkit:v0.2.0
 ```
 
 The release workflow tries to make the GHCR package public. If it remains
@@ -111,7 +117,7 @@ cache/media volume at `/media`:
 ```yaml
 containers:
   - name: sync
-    image: ghcr.io/blalange/netbox-inventory-toolkit:v0.1.7
+    image: ghcr.io/blalange/netbox-inventory-toolkit:v0.2.0
     command: ["netbox-inventory-toolkit", "sync"]
     env:
       - name: NETBOX_URL
