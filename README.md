@@ -21,7 +21,7 @@ without UniFi, and a manual-only inventory works without any live source.
 Use `uv` to run a pinned revision without installing anything globally:
 
 ```sh
-uvx --from git+https://github.com/Blalange/netbox-inventory-toolkit@v0.1.0 \
+uvx --from "netbox-inventory-toolkit[all] @ git+https://github.com/Blalange/netbox-inventory-toolkit@v0.1.2" \
   netbox-inventory-toolkit --help
 ```
 

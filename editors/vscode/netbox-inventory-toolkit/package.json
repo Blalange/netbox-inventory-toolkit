@@ -41,7 +41,7 @@
           },
           "default": [
             "--from",
-            "git+https://github.com/Blalange/netbox-inventory-toolkit@v0.1.0",
+            "netbox-inventory-toolkit[lsp] @ git+https://github.com/Blalange/netbox-inventory-toolkit@v0.1.2",
             "netbox-inventory-toolkit",
             "lsp"
           ],
