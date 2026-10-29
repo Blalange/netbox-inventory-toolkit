@@ -21,7 +21,7 @@ without UniFi, and a manual-only inventory works without any live source.
 Use `uv` to run a pinned revision without installing anything globally:
 
 ```sh
-uvx --from "netbox-inventory-toolkit[all] @ git+https://github.com/Blalange/netbox-inventory-toolkit@v0.1.5" \
+uvx --from "netbox-inventory-toolkit[all] @ git+https://github.com/Blalange/netbox-inventory-toolkit@v0.1.6" \
   netbox-inventory-toolkit --help
 ```
 
@@ -31,9 +31,9 @@ Or install it as a package from [PyPI](https://pypi.org/project/netbox-inventory
 pip install "netbox-inventory-toolkit[all]"
 ```
 
-The `pypi` GitHub Actions workflow publishes tagged releases using PyPI
-trusted publishing. It requires a trusted publisher configured for this
-repository, workflow `pypi.yaml`, and environment `pypi`.
+Tagged releases are published to PyPI from the `release.yml` workflow using
+PyPI trusted publishing. The trusted publisher is configured for this
+repository, workflow `release.yml`, and environment `pypi`.
 
 ## Quick start: SNMP + IPMI only
 
@@ -97,7 +97,7 @@ natural keys and provenance tags.
 The release workflow publishes:
 
 ```text
-ghcr.io/blalange/netbox-inventory-toolkit:v0.1.5
+ghcr.io/blalange/netbox-inventory-toolkit:v0.1.6
 ```
 
 The release workflow tries to make the GHCR package public. If it remains
@@ -111,7 +111,7 @@ cache/media volume at `/media`:
 ```yaml
 containers:
   - name: sync
-    image: ghcr.io/blalange/netbox-inventory-toolkit:v0.1.5
+    image: ghcr.io/blalange/netbox-inventory-toolkit:v0.1.6
     command: ["netbox-inventory-toolkit", "sync"]
     env:
       - name: NETBOX_URL

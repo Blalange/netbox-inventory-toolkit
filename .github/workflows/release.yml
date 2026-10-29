@@ -58,3 +58,20 @@ jobs:
             dist/*.whl
             dist/*.tar.gz
             editors/vscode/netbox-inventory-toolkit/*.vsix
+
+  pypi:
+    needs: package
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Set the package version from the tag
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          uv version "$VERSION" --no-sync
+      - run: uv build
+      - uses: pypa/gh-action-pypi-publish@release/v1

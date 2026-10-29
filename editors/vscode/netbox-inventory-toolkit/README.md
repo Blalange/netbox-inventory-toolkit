@@ -21,7 +21,7 @@ Make sure `uv` is available, then build and install the extension:
 cd editors/vscode/netbox-inventory-toolkit
 npm install
 npm run package
-code --install-extension netbox-inventory-toolkit-0.1.5.vsix
+code --install-extension netbox-inventory-toolkit-0.1.6.vsix
 ```
 
 Reload VS Code after installing. The extension starts the server in the
@@ -36,7 +36,7 @@ Extension Development Host, then open the inventory repository in that window.
 | Setting | Default | Purpose |
 | --- | --- | --- |
 | `netboxInventory.server.command` | `uvx` | Server command |
-| `netboxInventory.server.args` | `uvx --from "netbox-inventory-toolkit[lsp] @ git+…@v0.1.5" netbox-inventory-toolkit lsp` | Server arguments |
+| `netboxInventory.server.args` | `uvx --from "netbox-inventory-toolkit[lsp] @ git+…@v0.1.6" netbox-inventory-toolkit lsp` | Server arguments |
 | `netboxInventory.server.cwd` | workspace root | Server working directory |
 | `netboxInventory.inventory` | `inventory` | Inventory root containing `manual/` and `generated/` |
 
