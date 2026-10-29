@@ -32,6 +32,18 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+      # GHCR packages are private by default. This is best-effort: the package
+      # visibility API is intentionally limited for user-owned packages, so a
+      # repository owner may still need to flip it in the package settings.
+      - name: Make the container package public
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PATCH \
+            -H "Accept: application/vnd.github+json" \
+            /user/packages/container/netbox-inventory-toolkit \
+            -f visibility=public
 
   package:
     runs-on: ubuntu-latest
