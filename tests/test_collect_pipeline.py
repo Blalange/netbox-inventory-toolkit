@@ -76,6 +76,24 @@ def test_collect_none_writes_empty_generated_files(tmp_path: Path) -> None:
     assert load_generated(root, "module-types.yaml")["module_types"] == []
 
 
+def test_none_does_not_generate_manual_servers(tmp_path: Path) -> None:
+    root = write_inventory(
+        tmp_path / "inventory",
+        [
+            {
+                "name": "server-01",
+                "site": "example",
+                "role": "server",
+                "device_type": "generic-server",
+                "unifi_ip": "192.0.2.20",
+            }
+        ],
+    )
+    summary = collect(options(root, "none"))
+    assert summary.servers == 0
+    assert load_generated(root, "compute.yaml")["devices"] == []
+
+
 def test_missing_site_is_an_error(tmp_path: Path) -> None:
     root = write_inventory(tmp_path / "inventory", [])
     (root / "manual" / "site.yaml").write_text(

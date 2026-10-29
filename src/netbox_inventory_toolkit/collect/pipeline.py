@@ -119,12 +119,21 @@ def collect(options: CollectOptions) -> CollectSummary:
 
     module_types: dict[str, dict[str, Any]] = {}
     clients = state.unifi.clients if state.unifi else []
-    servers = build_servers(
-        clients,
-        manual,
-        _switch_name(network_devices),
-        module_types=module_types,
-        bmc_by_name=state.bmc_by_name,
+    has_compute_source = bool(
+        state.unifi is not None
+        or state.bmc_by_name
+        or (state.talos is not None and state.talos.nodes)
+    )
+    servers = (
+        build_servers(
+            clients,
+            manual,
+            _switch_name(network_devices),
+            module_types=module_types,
+            bmc_by_name=state.bmc_by_name,
+        )
+        if has_compute_source
+        else []
     )
     nodes: list[dict[str, Any]] = []
     if state.talos and state.talos.nodes:
