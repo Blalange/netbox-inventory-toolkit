@@ -1,0 +1,78 @@
+{
+  "name": "netbox-inventory-toolkit",
+  "displayName": "NetBox inventory toolkit",
+  "description": "Language support for NetBox inventory YAML files.",
+  "version": "0.1.0",
+  "publisher": "blalange",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.82.0"
+  },
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "yaml",
+    "inventory",
+    "netbox",
+    "language-server"
+  ],
+  "activationEvents": [
+    "onLanguage:yaml"
+  ],
+  "main": "./extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
+  "contributes": {
+    "configuration": {
+      "title": "NetBox inventory toolkit",
+      "properties": {
+        "netboxInventory.server.command": {
+          "type": "string",
+          "default": "uvx",
+          "description": "Command used to start the inventory language server."
+        },
+        "netboxInventory.server.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "--from",
+            "git+https://github.com/Blalange/netbox-inventory-toolkit@v0.1.0",
+            "netbox-inventory-toolkit",
+            "lsp"
+          ],
+          "description": "Arguments passed to the language server command."
+        },
+        "netboxInventory.server.cwd": {
+          "type": "string",
+          "default": "",
+          "description": "Working directory for the language server. Defaults to the workspace folder."
+        },
+        "netboxInventory.inventory": {
+          "type": "string",
+          "default": "inventory",
+          "description": "Inventory root containing manual/ and generated/."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "netboxInventory.restart",
+        "title": "NetBox inventory: Restart language server"
+      }
+    ]
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.2.2"
+  },
+  "scripts": {
+    "package": "vsce package --allow-missing-repository"
+  }
+}

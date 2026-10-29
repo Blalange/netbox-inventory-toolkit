@@ -1,0 +1,1 @@
+"""Optional inventory sources."""

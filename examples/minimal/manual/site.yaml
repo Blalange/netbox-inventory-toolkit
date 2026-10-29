@@ -1,0 +1,71 @@
+layer: manual
+
+# Collector settings. Only "site" is required when sources create devices.
+settings:
+  site: example
+  default_tag: production
+  roles:
+    control_plane: control-plane
+    worker: worker
+  compute_roles:
+    - server
+  snmp:
+    port_names: auto
+
+sites:
+  - name: Example site
+    slug: example
+    status: active
+    description: Minimal example inventory.
+
+manufacturers:
+  - name: Generic
+    slug: generic
+    description: Generic hardware.
+
+device_roles:
+  - name: Server
+    slug: server
+  - name: Switch
+    slug: switch
+
+device_types:
+  - manufacturer: generic
+    model: Generic switch
+    slug: generic-switch
+    u_height: 1
+  - manufacturer: generic
+    model: Generic server
+    slug: generic-server
+    u_height: 1
+
+devices:
+  - name: edge-switch
+    site: example
+    role: switch
+    device_type: generic-switch
+    status: active
+    snmp_ip: 192.0.2.10
+    snmp_interfaces: true
+    snmp_cables: true
+    interfaces:
+      - name: Port 24
+        type: 1000base-t
+        ip_addresses:
+          - address: 192.0.2.10/24
+            dns_name: edge-switch
+            primary: true
+
+  - name: server-01
+    site: example
+    role: server
+    device_type: generic-server
+    status: active
+    ipmi_ip: 192.0.2.20
+    interfaces:
+      - name: eno1
+        type: 1000base-t
+        ip_addresses:
+          - address: 192.0.2.20/24
+            dns_name: server-01
+            primary: true

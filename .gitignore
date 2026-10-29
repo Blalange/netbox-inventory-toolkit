@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.venv-*/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Node / VS Code extension
+node_modules/
+*.vsix
+
+# Runtime caches
+.dtl-cache/
+inventory/.dtl-cache/
