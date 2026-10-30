@@ -237,9 +237,6 @@ class CollectorConfig:
             self.defaults.unifi_vlan_names
         )
 
-    def unifi_profile(self, name: str) -> UnifiProfile | None:
-        return next((profile for profile in self.unifi if profile.name == name), None)
-
     def snmp_profile_for(
         self,
         *,
@@ -325,23 +322,37 @@ class CollectorConfig:
         """Return warnings and errors for inventory/profile mismatches."""
         errors: list[str] = []
         warnings: list[str] = []
+        mode = self.sources_mode or "auto"
+        selected = (
+            {item.strip() for item in mode.split(",")}
+            if mode not in {"auto", "all", "none"}
+            else None
+        )
+
+        def active(kind: str, profiles: list[Any]) -> bool:
+            if mode == "none":
+                return False
+            if selected is not None:
+                return kind in selected and bool(profiles)
+            return bool(profiles)
+
         for device in manual.get("devices") or []:
             name = str(device.get("name") or "")
-            if device.get("snmp_ip"):
+            if device.get("snmp_ip") and active("snmp", self.snmp):
                 try:
                     self.snmp_profile_for(
                         device=device, address=str(device["snmp_ip"])
                     )
                 except InventoryError as exc:
                     errors.append(f"device {name!r}: {exc}")
-            if device.get("redfish_ip"):
+            if device.get("redfish_ip") and active("redfish", self.redfish):
                 try:
                     self.redfish_profile_for(
                         device=device, address=str(device["redfish_ip"])
                     )
                 except InventoryError as exc:
                     errors.append(f"device {name!r}: {exc}")
-            if device.get("ipmi_ip"):
+            if device.get("ipmi_ip") and active("ipmi", self.ipmi):
                 try:
                     self.ipmi_profile_for(
                         device=device, address=str(device["ipmi_ip"])
@@ -349,7 +360,11 @@ class CollectorConfig:
                 except InventoryError as exc:
                     errors.append(f"device {name!r}: {exc}")
             cluster = str(device.get("talos_cluster") or "").strip()
-            if cluster and cluster not in {profile.name for profile in self.talos}:
+            if (
+                cluster
+                and self.talos
+                and cluster not in {profile.name for profile in self.talos}
+            ):
                 errors.append(
                     f"device {name!r}: talos_cluster refers to unknown profile {cluster!r}"
                 )
@@ -764,7 +779,6 @@ def load_settings_file(path: Path, manual: dict[str, Any] | None = None) -> Coll
     unifi = _parse_unifi(
         _as_list(sources_raw.get("unifi"), "sources.unifi"),
         defaults,
-        base,
     )
     snmp = _parse_snmp(_as_list(sources_raw.get("snmp"), "sources.snmp"))
     redfish = _parse_redfish(
@@ -914,7 +928,6 @@ def _parse_k8s_secret_reference(value: str, path: str) -> tuple[str, str, str]:
 
 def _parse_defaults(raw: dict[str, Any], manual: dict[str, Any]) -> Defaults:
     base = _defaults_from_manual(manual)
-    settings = _manual_settings(manual)
     site = _optional_str(raw.get("site")) or base.site
     default_tag = (
         _optional_str(raw.get("default_tag"))
@@ -937,7 +950,7 @@ def _parse_defaults(raw: dict[str, Any], manual: dict[str, Any]) -> Defaults:
             _vlan_name_map(raw.get("unifi_vlan_names"), "defaults.unifi_vlan_names")
         )
     return Defaults(
-        site=site or str(settings.get("site") or ""),
+        site=site,
         default_tag=default_tag,
         rack=rack,
         talos_platform=talos_platform,
@@ -976,7 +989,6 @@ def _defaults_from_manual(manual: dict[str, Any]) -> Defaults:
 def _parse_unifi(
     items: list[Any],
     defaults: Defaults,
-    base: Path,
 ) -> list[UnifiProfile]:
     result: list[UnifiProfile] = []
     for index, item in enumerate(items):

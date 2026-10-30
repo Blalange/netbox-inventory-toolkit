@@ -80,6 +80,11 @@ def main(argv: list[str] | None = None) -> int:
         config = load_config(options, manual)
         config.apply_to_manual(manual)
         warnings, errors = config.validate_inventory(manual)
+        mode = config.sources_mode or "auto"
+        if mode not in {"auto", "all", "none"}:
+            for name in (item.strip() for item in mode.split(",")):
+                if not getattr(config, name, None):
+                    errors.append(f"source {name!r} is selected but has no profiles")
         warnings.extend(_availability(config))
         if not config.defaults.site:
             warnings.append("defaults.site is empty; generated devices need a site")

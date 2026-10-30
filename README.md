@@ -21,7 +21,7 @@ without UniFi, and a manual-only inventory works without any live source.
 Use `uv` to run a pinned release without installing anything globally:
 
 ```sh
-uvx --python 3.13 --from "netbox-inventory-toolkit[all]==0.3.1" \
+uvx --python 3.13 --from "netbox-inventory-toolkit[all]==0.3.2" \
   netbox-inventory-toolkit --help
 ```
 
@@ -129,7 +129,7 @@ natural keys and provenance tags.
 The release workflow publishes:
 
 ```text
-ghcr.io/blalange/netbox-inventory-toolkit:v0.3.1
+ghcr.io/blalange/netbox-inventory-toolkit:v0.3.2
 ```
 
 The release workflow tries to make the GHCR package public. If it remains
@@ -143,7 +143,7 @@ cache/media volume at `/media`:
 ```yaml
 containers:
   - name: sync
-    image: ghcr.io/blalange/netbox-inventory-toolkit:v0.3.1
+    image: ghcr.io/blalange/netbox-inventory-toolkit:v0.3.2
     command: ["netbox-inventory-toolkit", "sync"]
     env:
       - name: NETBOX_URL

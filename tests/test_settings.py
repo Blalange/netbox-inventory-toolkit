@@ -345,3 +345,30 @@ def test_settings_file_is_ignored_by_inventory_scan(tmp_path: Path) -> None:
 def test_settings_are_loaded_from_inventory_root(tmp_path: Path) -> None:
     path = write_settings(tmp_path, {"version": 1})
     assert find_settings_file(tmp_path) == path.resolve()
+
+
+def test_inventory_validation_skips_sources_without_profiles() -> None:
+    from netbox_inventory_toolkit.collect.settings import CollectorConfig, Defaults
+
+    config = CollectorConfig(
+        sources_mode="none",
+        defaults=Defaults(site="example"),
+        snmp=[],
+        redfish=[],
+        ipmi=[],
+        talos=[],
+    )
+    warnings, errors = config.validate_inventory(
+        {
+            "devices": [
+                {
+                    "name": "server-01",
+                    "snmp_ip": "192.0.2.10",
+                    "redfish_ip": "192.0.2.11",
+                    "ipmi_ip": "192.0.2.12",
+                }
+            ]
+        }
+    )
+    assert warnings == []
+    assert errors == []
