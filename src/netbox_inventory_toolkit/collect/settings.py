@@ -778,8 +778,6 @@ def load_settings_file(path: Path, manual: dict[str, Any] | None = None) -> Coll
         default_kubectl=kubectl,
         default_kubeconfig=kubeconfig,
     )
-    _validate_profiles(unifi, snmp, redfish, ipmi, talos)
-
     config = CollectorConfig(
         version=version,
         settings_path=path,
@@ -1221,16 +1219,6 @@ def _parse_match(value: Any, path: str) -> MatchRule:
         roles=tuple(_string_list(raw.get("roles"), f"{path}.roles")),
         cidrs=tuple(cidrs),
     )
-
-
-def _validate_profiles(
-    unifi: list[UnifiProfile],
-    snmp: list[SnmpProfile],
-    redfish: list[RedfishProfile],
-    ipmi: list[IpmiProfile],
-    talos: list[TalosProfile],
-) -> None:
-    del unifi, snmp, redfish, ipmi, talos
 
 
 def _validate_names(profiles: list[Any], path: str) -> None:

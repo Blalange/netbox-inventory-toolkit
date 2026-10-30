@@ -67,6 +67,7 @@ def _select_profile(
         return None
     if protocol == "snmp":
         return config.snmp_profile_for(
+            device=target.device,
             name=target.device_name,
             site=target.site,
             address=target.address,
@@ -74,12 +75,14 @@ def _select_profile(
         )
     if protocol == "redfish":
         return config.redfish_profile_for(
+            device=target.device,
             name=target.device_name,
             site=target.site,
             address=target.address,
             explicit=options.redfish_credential,
         )
     return config.ipmi_profile_for(
+        device=target.device,
         name=target.device_name,
         site=target.site,
         address=target.address,

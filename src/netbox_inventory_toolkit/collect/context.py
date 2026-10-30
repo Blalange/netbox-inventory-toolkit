@@ -80,7 +80,7 @@ class CollectContext:
     def __post_init__(self) -> None:
         if self.config is None:
             self.config = legacy_config(self.options, self.manual)
-            self.config.apply_to_manual(self.manual)
+        self.config.apply_to_manual(self.manual)
 
     @property
     def settings(self) -> dict[str, Any]:

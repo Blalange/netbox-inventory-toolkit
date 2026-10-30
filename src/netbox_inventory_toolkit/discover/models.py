@@ -96,6 +96,7 @@ class ScanTarget:
     source: str  # explicit, network, inventory
     site: str = ""
     device_name: str = ""
+    device: dict[str, Any] | None = None
 
 
 @dataclass

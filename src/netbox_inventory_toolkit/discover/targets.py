@@ -54,6 +54,7 @@ def expand_targets(
         *,
         site: str = "",
         device_name: str = "",
+        device: dict | None = None,
     ) -> None:
         normalized = str(ipaddress.ip_address(address))
         if normalized in excluded_addresses:
@@ -67,6 +68,7 @@ def expand_targets(
                 source=source,
                 site=site,
                 device_name=device_name,
+                device=device,
             )
 
     for value in _split_values(options.targets):
@@ -100,6 +102,7 @@ def expand_targets(
                             "inventory",
                             site=device.site,
                             device_name=device.name,
+                            device=device.raw,
                         )
                     except ValueError:
                         continue

@@ -90,7 +90,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: sync
-              image: ghcr.io/blalange/netbox-inventory-toolkit:v0.3.0
+              image: ghcr.io/blalange/netbox-inventory-toolkit:v0.3.1
               command: ["netbox-inventory-toolkit", "sync"]
               env:
                 - name: NETBOX_URL
