@@ -33,10 +33,32 @@ from .sources.talos import (
 log = get_logger(__name__)
 
 
+_UPLINK_MEDIA_TYPES = {
+    "dac": "10gbase-x-sfpp",
+    "dac-active": "10gbase-x-sfpp",
+    "dac-passive": "10gbase-x-sfpp",
+    "aoc": "10gbase-x-sfpp",
+    "sfp+": "10gbase-x-sfpp",
+    "sfp-plus": "10gbase-x-sfpp",
+    "sfp": "1000base-x-sfp",
+}
+
+
 def _manual_interface_type(device: dict[str, Any] | None, name: str) -> str:
     for interface in (device or {}).get("interfaces") or []:
         if str(interface.get("name") or "") == name and interface.get("type"):
             return str(interface["type"])
+    return ""
+
+
+def _manual_uplink_interface_type(device: dict[str, Any] | None, name: str) -> str:
+    for uplink in (device or {}).get("uplinks") or []:
+        if str(uplink.get("interface") or "") != name:
+            continue
+        if uplink.get("interface_type"):
+            return str(uplink["interface_type"])
+        media = str(uplink.get("type") or "").strip().lower()
+        return _UPLINK_MEDIA_TYPES.get(media, "")
     return ""
 
 
@@ -100,7 +122,8 @@ def build_servers(
                 iface_name = str(uplink.get("interface") or "Port 1")
                 entry: dict[str, Any] = {
                     "name": iface_name,
-                    "type": "1000base-t",
+                    "type": _manual_uplink_interface_type(device, iface_name)
+                    or "1000base-t",
                     "enabled": True,
                     "description": f"Uplink to {uplink.get('switch')} Port {uplink.get('port')}",
                     "sources": interface_sources,
@@ -129,7 +152,15 @@ def build_servers(
         if unifi_name:
             description += f" (UniFi client {unifi_name})"
         if port:
-            link = f"{switch_name} Port {port}" if switch_name else f"Port {port}"
+            uplink_switch = next(
+                (
+                    str(uplink.get("switch") or "")
+                    for uplink in uplinks
+                    if str(uplink.get("port")) == str(port)
+                ),
+                "",
+            ) or switch_name
+            link = f"{uplink_switch} Port {port}" if uplink_switch else f"Port {port}"
             description += f", {link}"
         if mac:
             description += f", MAC {mac}"
@@ -308,7 +339,11 @@ def build_nodes(
         if members:
             iface_type = "lag"
         else:
-            iface_type = _manual_interface_type(manual_device, iface_name) or "1000base-t"
+            iface_type = (
+                _manual_interface_type(manual_device, iface_name)
+                or _manual_uplink_interface_type(manual_device, iface_name)
+                or "1000base-t"
+            )
         primary_entry: dict[str, Any] = {
             "name": iface_name,
             "type": iface_type,

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from netbox_inventory_toolkit.collect.context import CollectContext, CollectOptions
 from netbox_inventory_toolkit.collect.identity import DeviceResolver
 from netbox_inventory_toolkit.collect.snmp_merge import merge_snmp_observations
 from netbox_inventory_toolkit.collect.sources.snmp import _build_vlans
@@ -322,3 +323,39 @@ def test_manual_interface_values_are_not_overwritten() -> None:
         devices, vlans, observations, resolver, {"settings": {"site": "glemmen"}}
     )
     assert devices == []
+
+
+def test_snmp_source_includes_active_unifi_targets(monkeypatch) -> None:
+    from netbox_inventory_toolkit.collect.sources import snmp as snmp_source
+    from netbox_inventory_toolkit.collect.sources.base import SourceState, UnifiData
+
+    captured: dict = {}
+
+    async def fake_collect(targets, **kwargs):
+        captured["targets"] = targets
+        return []
+
+    monkeypatch.setattr(snmp_source, "collect_snmp", fake_collect)
+    manual = {
+        "settings": {"site": "example", "snmp": {"auto_unifi": True}},
+        "devices": [],
+    }
+    ctx = CollectContext(CollectOptions(), manual, DeviceResolver(manual))
+    state = SourceState(
+        unifi=UnifiData(
+            raw_devices=[
+                {
+                    "state": 1,
+                    "lan_ip": "192.0.2.30",
+                    "mac": "AA:BB:CC:DD:EE:FF",
+                }
+            ],
+            names={"AA:BB:CC:DD:EE:FF": "ap-01"},
+        )
+    )
+
+    snmp_source.SnmpSource().collect(ctx, state)
+
+    assert captured["targets"] == [
+        {"ip": "192.0.2.30", "name": "ap-01", "source": "unifi"}
+    ]

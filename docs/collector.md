@@ -50,6 +50,19 @@ Interface naming is controlled by `settings.snmp.port_names`:
 - `port-number` — only `Port N`
 - `ifname` — use `ifName`/`ifAlias`/`ifDescr`
 
+When the UniFi source is enabled, active UniFi devices are also polled for SNMP
+enrichment by default. This fills VLAN membership for devices that are generated
+from UniFi but have no manual `snmp_ip`. Disable it with:
+
+```yaml
+settings:
+  snmp:
+    auto_unifi: false
+```
+
+Uplink entries may set `interface_type` to override the interface type inferred
+from the cable `type` (for example `dac-passive` → `10gbase-x-sfpp`).
+
 SNMP v2c defaults to community `public`. Set `SNMP_COMMUNITY`,
 `--snmp-community`, `SNMP_TIMEOUT` and `SNMP_RETRIES` as needed.
 `--snmp-report PATH` writes raw observations for troubleshooting.

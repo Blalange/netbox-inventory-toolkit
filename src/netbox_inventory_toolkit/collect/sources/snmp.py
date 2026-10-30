@@ -9,6 +9,7 @@ from typing import Any
 
 from netbox_inventory_toolkit.inventory.util import InventoryError
 
+from ..config import snmp_auto_unifi
 from ..log import get_logger
 from .base import SnmpData, Source, SourceState
 from .snmp_oids import (
@@ -24,6 +25,7 @@ from .snmp_oids import (
     value_mac,
     value_text,
 )
+from .unifi import unifi_ip
 
 try:
     from pysnmp.hlapi.v3arch.asyncio import (
@@ -411,9 +413,12 @@ class SnmpSource(Source):
     name = "snmp"
 
     def enabled(self, ctx: Any, state: SourceState) -> bool:
-        return any(
+        manual_targets = any(
             str(device.get("snmp_ip") or "").strip()
             for device in ctx.manual.get("devices") or []
+        )
+        return manual_targets or (
+            state.unifi is not None and snmp_auto_unifi(ctx.manual)
         )
 
     def collect(self, ctx: Any, state: SourceState) -> None:
@@ -427,6 +432,25 @@ class SnmpSource(Source):
             for device in ctx.manual.get("devices") or []
             if str(device.get("snmp_ip") or "").strip()
         ]
+        seen = {str(target["ip"]) for target in targets}
+        if state.unifi is not None and snmp_auto_unifi(ctx.manual):
+            for device in state.unifi.raw_devices:
+                if device.get("state") != 1:
+                    continue
+                address = unifi_ip(device)
+                if not address or address in seen:
+                    continue
+                mac = str(device.get("mac") or "").upper()
+                targets.append(
+                    {
+                        "ip": address,
+                        "name": state.unifi.names.get(
+                            mac, str(device.get("name") or "")
+                        ),
+                        "source": "unifi",
+                    }
+                )
+                seen.add(address)
         observations = asyncio.run(
             collect_snmp(
                 targets,

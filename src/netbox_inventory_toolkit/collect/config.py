@@ -67,3 +67,9 @@ def snmp_port_names(manual: dict[str, Any]) -> str:
             f"settings.snmp.port_names must be one of {sorted(VALID_SNMP_PORT_NAMES)}, got {mode!r}"
         )
     return mode
+
+
+def snmp_auto_unifi(manual: dict[str, Any]) -> bool:
+    value = settings(manual).get("snmp")
+    snmp = value if isinstance(value, dict) else {}
+    return bool(snmp.get("auto_unifi", True))

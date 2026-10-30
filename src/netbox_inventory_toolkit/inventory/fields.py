@@ -539,6 +539,9 @@ UPLINK_FIELDS = {
     "switch": string(required=True, description="Switch device name."),
     "port": integer(required=True, minimum=1, description="Switch port number."),
     "type": suggestions(CABLE_TYPES, description="NetBox cable type."),
+    "interface_type": suggestions(
+        INTERFACE_TYPES, description="Optional NetBox interface type override."
+    ),
 }
 
 CABLE_FIELDS = _with_common(
@@ -652,7 +655,10 @@ SETTINGS_FIELDS = {
             "port_names": enum(
                 ("auto", "port-number", "ifname"),
                 description="Interface naming strategy for SNMP-generated ports.",
-            )
+            ),
+            "auto_unifi": boolean(
+                description="Also poll active UniFi devices for SNMP enrichment."
+            ),
         }
     ),
 }

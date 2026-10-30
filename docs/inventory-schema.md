@@ -55,6 +55,7 @@ settings:
     - server
   snmp:
     port_names: auto           # auto | port-number | ifname
+    auto_unifi: true           # poll active UniFi devices for SNMP enrichment
 ```
 
 `unifi_models` (UniFi model code -> device-type slug) and

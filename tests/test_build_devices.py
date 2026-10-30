@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from netbox_inventory_toolkit.collect.build import build_servers
+from netbox_inventory_toolkit.collect.build import (
+    _manual_uplink_interface_type,
+    build_servers,
+)
 
 
 def redfish_payload() -> dict:
@@ -46,6 +49,50 @@ def redfish_payload() -> dict:
         ],
         "psus": [],
     }
+
+
+def test_description_uses_manual_uplink_switch() -> None:
+    manual = {
+        "settings": {"site": "glemmen", "default_tag": "production"},
+        "devices": [
+            {
+                "name": "server110",
+                "role": "server",
+                "device_type": "dell-poweredge-r250",
+                "unifi_ip": "192.0.2.10",
+                "unifi_mac": "00:11:22:33:44:55",
+                "uplinks": [
+                    {
+                        "interface": "Port 1",
+                        "switch": "Correct Switch",
+                        "port": 7,
+                        "type": "cat6",
+                    }
+                ],
+            }
+        ],
+    }
+    clients = [
+        {
+            "is_wired": True,
+            "ip": "192.0.2.10",
+            "mac": "00:11:22:33:44:55",
+            "sw_port": 7,
+            "name": "server110",
+        }
+    ]
+    servers = build_servers(clients, manual, "Wrong Switch")
+    assert "Correct Switch Port 7" in servers[0]["description"]
+    assert "Wrong Switch" not in servers[0]["description"]
+
+
+def test_dac_uplink_maps_to_sfp_interface() -> None:
+    device = {
+        "uplinks": [
+            {"interface": "enp4s0f0", "switch": "switch", "port": 26, "type": "dac-passive"}
+        ]
+    }
+    assert _manual_uplink_interface_type(device, "enp4s0f0") == "10gbase-x-sfpp"
 
 
 def test_manual_only_server_gets_bmc_modules() -> None:
