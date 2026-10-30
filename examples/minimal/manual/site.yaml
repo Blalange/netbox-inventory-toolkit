@@ -1,17 +1,5 @@
 layer: manual
 
-# Collector settings. Only "site" is required when sources create devices.
-settings:
-  site: example
-  default_tag: production
-  roles:
-    control_plane: control-plane
-    worker: worker
-  compute_roles:
-    - server
-  snmp:
-    port_names: auto
-
 sites:
   - name: Example site
     slug: example
