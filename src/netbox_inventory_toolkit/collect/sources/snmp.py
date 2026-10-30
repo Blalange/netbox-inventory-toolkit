@@ -9,7 +9,6 @@ from typing import Any
 
 from netbox_inventory_toolkit.inventory.util import InventoryError
 
-from ..config import snmp_auto_unifi
 from ..log import get_logger
 from .base import SnmpData, Source, SourceState
 from .snmp_oids import (
@@ -312,6 +311,8 @@ async def _poll_target(
         return {
             "ip": ip,
             "target_name": str(target.get("name") or ""),
+            "site": str(target.get("site") or ""),
+            "credential": str(target.get("credential") or ""),
             "sys": system,
             "base_mac": base_mac or "",
             "serial": serial,
@@ -413,50 +414,114 @@ class SnmpSource(Source):
     name = "snmp"
 
     def enabled(self, ctx: Any, state: SourceState) -> bool:
+        config = ctx.config
+        if config is None or not [p for p in config.snmp if p.enabled]:
+            return False
         manual_targets = any(
             str(device.get("snmp_ip") or "").strip()
             for device in ctx.manual.get("devices") or []
         )
-        return manual_targets or (
-            state.unifi is not None and snmp_auto_unifi(ctx.manual)
+        auto_targets = bool(
+            config.auto_unifi and [p for p in config.unifi if p.enabled]
         )
+        return manual_targets or auto_targets
 
     def collect(self, ctx: Any, state: SourceState) -> None:
-        options = ctx.options
-        targets = [
-            {
-                "ip": str(device.get("snmp_ip") or "").strip(),
-                "name": str(device.get("name") or ""),
-                "source": "manual",
-            }
-            for device in ctx.manual.get("devices") or []
-            if str(device.get("snmp_ip") or "").strip()
-        ]
-        seen = {str(target["ip"]) for target in targets}
-        if state.unifi is not None and snmp_auto_unifi(ctx.manual):
-            for device in state.unifi.raw_devices:
-                if device.get("state") != 1:
-                    continue
-                address = unifi_ip(device)
-                if not address or address in seen:
-                    continue
-                mac = str(device.get("mac") or "").upper()
-                targets.append(
-                    {
-                        "ip": address,
-                        "name": state.unifi.names.get(
-                            mac, str(device.get("name") or "")
-                        ),
-                        "source": "unifi",
-                    }
-                )
-                seen.add(address)
-        observations = asyncio.run(
-            collect_snmp(
-                targets,
-                community=options.snmp_community,
-                timeout=options.snmp_timeout,
-                retries=options.snmp_retries,
+        config = ctx.config
+        if config is None:
+            return
+        default_site = config.defaults.site
+        targets: list[dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for device in ctx.manual.get("devices") or []:
+            address = str(device.get("snmp_ip") or "").strip()
+            if not address:
+                continue
+            site = str(device.get("site") or default_site)
+            targets.append(
+                {
+                    "ip": address,
+                    "name": str(device.get("name") or ""),
+                    "site": site,
+                    "source": "manual",
+                    "device": device,
+                    "credential": None,
+                }
             )
-        )
+            seen.add((site, address))
+        if config.auto_unifi:
+            for unifi in state.unifi:
+                for device in unifi.raw_devices:
+                    if device.get("state") != 1:
+                        continue
+                    address = unifi_ip(device)
+                    if not address or (unifi.site, address) in seen:
+                        continue
+                    mac = str(device.get("mac") or "").upper()
+                    targets.append(
+                        {
+                            "ip": address,
+                            "name": unifi.names.get(
+                                mac, str(device.get("name") or "")
+                            ),
+                            "site": unifi.site,
+                            "source": "unifi",
+                            "device": None,
+                            "credential": unifi.snmp_credential,
+                        }
+                    )
+                    seen.add((unifi.site, address))
+        if not targets:
+            state.snmp = SnmpData()
+            return
+
+        grouped: dict[str, tuple[Any, list[dict[str, Any]]]] = {}
+        skipped = 0
+        for target in targets:
+            try:
+                profile = config.snmp_profile_for(
+                    device=target.get("device"),
+                    name=str(target.get("name") or ""),
+                    site=str(target.get("site") or ""),
+                    address=str(target.get("ip") or ""),
+                    explicit=target.get("credential"),
+                )
+            except InventoryError as exc:
+                log.warning(
+                    "SNMP target %s (%s): %s",
+                    target.get("name") or target.get("ip"),
+                    target.get("ip"),
+                    exc,
+                )
+                skipped += 1
+                continue
+            target["credential"] = profile.name
+            grouped.setdefault(profile.name, (profile, []))[1].append(target)
+        if not grouped:
+            raise InventoryError(
+                f"no SNMP credentials matched {skipped} configured target(s)"
+            )
+
+        observations: list[dict[str, Any]] = []
+        errors: list[Exception] = []
+        for profile, profile_targets in grouped.values():
+            log.debug(
+                "SNMP profile %s: polling %d target(s)", profile.name, len(profile_targets)
+            )
+            try:
+                observations.extend(
+                    asyncio.run(
+                        collect_snmp(
+                            profile_targets,
+                            community=profile.community,
+                            timeout=profile.timeout,
+                            retries=profile.retries,
+                        )
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001 - keep other profiles running
+                log.warning("SNMP profile %s failed: %s", profile.name, exc)
+                errors.append(exc)
+        if errors and not observations:
+            raise InventoryError(f"all SNMP profiles failed: {errors[-1]}")
         state.snmp = SnmpData(observations=observations)

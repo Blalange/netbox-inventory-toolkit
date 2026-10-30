@@ -9,8 +9,10 @@ import sys
 import time
 from pathlib import Path
 
+from netbox_inventory_toolkit.collect.context import CollectOptions
 from netbox_inventory_toolkit.collect.log import configure_logging, get_logger
-from netbox_inventory_toolkit.inventory.util import env_bool
+from netbox_inventory_toolkit.collect.settings import find_settings_file, load_config
+from netbox_inventory_toolkit.inventory.util import InventoryError, env_bool
 
 from .inventory_scan import load_snapshot
 from .match import match_probes
@@ -36,6 +38,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--inventory",
         default=os.environ.get("INVENTORY_DIR", "inventory"),
         help="inventory root containing manual/ and generated/ (default: inventory)",
+    )
+    parser.add_argument(
+        "--settings",
+        default=None,
+        help="collector settings.yml (default: COLLECTOR_SETTINGS or <inventory>/settings.yml)",
     )
     parser.add_argument(
         "--targets",
@@ -92,10 +99,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--snmp-credential",
+        default=None,
+        help="use this SNMP profile from settings.yml",
+    )
+    parser.add_argument(
+        "--redfish-credential",
+        default=None,
+        help="use this Redfish profile from settings.yml",
+    )
+    parser.add_argument(
+        "--ipmi-credential",
+        default=None,
+        help="use this IPMI profile from settings.yml",
+    )
+    parser.add_argument(
         "--redfish-auth",
         action="store_true",
         default=env_bool("REDFISH_AUTH", False),
-        help="send Redfish credentials during discovery (default: no auth)",
+        help="legacy mode: send Redfish credentials during discovery",
     )
     parser.add_argument(
         "--redfish-user",
@@ -203,10 +225,28 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     configure_logging("DEBUG" if args.verbose else args.log_level, args.log_file)
 
+    inventory = Path(args.inventory)
     try:
         protocols = _parse_protocols(args.protocols)
+        settings_path = find_settings_file(
+            inventory, args.settings or os.environ.get("COLLECTOR_SETTINGS")
+        )
+        if settings_path is None:
+            log.warning(
+                "No collector settings file found; using deprecated discovery "
+                "flags and environment variables. Create %s to share credentials "
+                "with collect.",
+                inventory / "settings.yml",
+            )
+        snapshot = load_snapshot(inventory)
+        manual = {"settings": snapshot.settings}
+        config = load_config(
+            CollectOptions(inventory=inventory, settings_path=settings_path),
+            manual,
+        )
+        config.apply_to_manual(manual)
         options = DiscoveryOptions(
-            inventory=Path(args.inventory),
+            inventory=inventory,
             targets=args.targets,
             networks=args.network,
             excludes=args.exclude,
@@ -229,6 +269,10 @@ def main(argv: list[str] | None = None) -> int:
             ipmi_pass=args.ipmi_pass,
             ipmi_timeout=args.ipmi_timeout,
             ipmi_binary=args.ipmitool,
+            config=config,
+            snmp_credential=args.snmp_credential,
+            redfish_credential=args.redfish_credential,
+            ipmi_credential=args.ipmi_credential,
             default_role=args.default_role,
             default_device_type=args.default_device_type,
             output_format=args.output_format,
@@ -236,7 +280,6 @@ def main(argv: list[str] | None = None) -> int:
             write_new=args.write_new,
         )
         started = time.monotonic()
-        snapshot = load_snapshot(options.inventory)
         targets = expand_targets(options, snapshot)
         probes = []
         warnings: list[str] = []
@@ -269,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
                 else "No complete new devices to write"
             )
         return 0
-    except DiscoveryError as exc:
+    except (DiscoveryError, InventoryError) as exc:
         log.error("Discovery failed: %s", exc)
         return 1
 

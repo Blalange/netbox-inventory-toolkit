@@ -96,3 +96,56 @@ def test_ipmi_probe_maps_identity(monkeypatch) -> None:
     assert result.identity["manufacturer"] == "Dell Inc."
     assert result.identity["model"] == "PowerEdge R515"
     assert result.identity["serial"] == "JVCJGZ1"
+
+
+def test_discovery_uses_matching_snmp_profile(monkeypatch) -> None:
+    from netbox_inventory_toolkit.collect.settings import (
+        CollectorConfig,
+        Defaults,
+        MatchRule,
+        SnmpProfile,
+    )
+    from netbox_inventory_toolkit.discover.models import ScanTarget
+
+    calls: list[tuple[str, str]] = []
+
+    async def fake_probe(address, **kwargs):
+        calls.append((address, kwargs["community"]))
+        return {
+            "ip": address,
+            "sys": {"name": "switch", "descr": "Generic switch"},
+            "model": "GS1920",
+            "serial": "SW1",
+        }
+
+    monkeypatch.setattr(probes, "probe_snmp", fake_probe)
+    config = CollectorConfig(
+        defaults=Defaults(site="example"),
+        snmp=[
+            SnmpProfile(
+                name="legacy",
+                community="private",
+                match=MatchRule(devices=("old-*",)),
+            ),
+            SnmpProfile(name="default", community="public", default=True),
+        ],
+    )
+    options = DiscoveryOptions(
+        inventory=Path("."), protocols={"snmp"}, config=config
+    )
+
+    asyncio.run(
+        probes.probe_targets(
+            [
+                ScanTarget(
+                    address="192.0.2.10",
+                    source="inventory",
+                    site="example",
+                    device_name="old-switch",
+                )
+            ],
+            options,
+        )
+    )
+
+    assert calls == [("192.0.2.10", "private")]

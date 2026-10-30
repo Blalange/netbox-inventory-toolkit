@@ -590,6 +590,16 @@ DEVICE_FIELDS = _with_common(
         "snmp_ip": string(description="Collector locator: SNMP management address."),
         "snmp_interfaces": boolean(description="Let SNMP own the physical interface list."),
         "snmp_cables": boolean(description="Let SNMP generate cables from LLDP/FDB data."),
+        "snmp_credential": string(description="Collector SNMP credential profile name."),
+        "redfish_credential": string(
+            description="Collector Redfish credential profile name."
+        ),
+        "ipmi_credential": string(
+            description="Collector IPMI credential profile name."
+        ),
+        "talos_cluster": string(
+            description="Collector Talos/Kubernetes cluster profile name."
+        ),
         "oob_ip": string(description="Out-of-band management address."),
     }
 )
@@ -620,6 +630,10 @@ DEVICE_DEFAULT_FIELDS = {
     "snmp_ip": string(),
     "snmp_interfaces": boolean(),
     "snmp_cables": boolean(),
+    "snmp_credential": string(),
+    "redfish_credential": string(),
+    "ipmi_credential": string(),
+    "talos_cluster": string(),
     "oob_ip": string(),
 }
 

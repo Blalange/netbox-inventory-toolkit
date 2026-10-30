@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, ClassVar
 
 from ..context import CollectContext
@@ -11,6 +12,9 @@ from ..context import CollectContext
 
 @dataclass
 class UnifiData:
+    source: str = ""
+    site: str = ""
+    snmp_credential: str | None = None
     devices: list[dict[str, Any]] = field(default_factory=list)
     vlans: list[dict[str, Any]] = field(default_factory=list)
     prefixes: list[dict[str, Any]] = field(default_factory=list)
@@ -28,15 +32,20 @@ class SnmpData:
 
 @dataclass
 class TalosData:
+    source: str = ""
+    site: str = ""
+    config_dir: Path | None = None
+    talosctl: str | None = None
+    talosconfig: str | None = None
     nodes: list[dict[str, Any]] = field(default_factory=list)
     manual_by_node: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
 class SourceState:
-    unifi: UnifiData | None = None
+    unifi: list[UnifiData] = field(default_factory=list)
     snmp: SnmpData | None = None
-    talos: TalosData | None = None
+    talos: list[TalosData] = field(default_factory=list)
     redfish: dict[str, dict[str, Any]] = field(default_factory=dict)
     ipmi: dict[str, dict[str, Any]] = field(default_factory=dict)
 

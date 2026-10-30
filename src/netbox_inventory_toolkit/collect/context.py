@@ -16,6 +16,7 @@ from .config import (
     DEFAULT_SNMP_COMMUNITY,
 )
 from .identity import DeviceResolver
+from .settings import CollectorConfig, legacy_config
 
 ALL_SOURCES = ("unifi", "snmp", "talos", "redfish", "ipmi")
 
@@ -25,8 +26,9 @@ class CollectOptions:
     inventory: Path = Path("inventory")
     manual_dir: Path | None = None
     output_dir: Path | None = None
-    sources_mode: str = "auto"
+    sources_mode: str | None = None
     disabled_sources: set[str] = field(default_factory=set)
+    settings_path: Path | None = None
 
     talos_config_dir: Path | None = None
     kubectl: str = "kubectl"
@@ -53,7 +55,7 @@ class CollectOptions:
     snmp_report: Path | None = None
 
     log_file: Path | None = None
-    log_level: str = "INFO"
+    log_level: str | None = None
 
     @property
     def manual_path(self) -> Path:
@@ -73,6 +75,12 @@ class CollectContext:
     options: CollectOptions
     manual: dict[str, Any]
     resolver: DeviceResolver
+    config: CollectorConfig | None = None
+
+    def __post_init__(self) -> None:
+        if self.config is None:
+            self.config = legacy_config(self.options, self.manual)
+            self.config.apply_to_manual(self.manual)
 
     @property
     def settings(self) -> dict[str, Any]:

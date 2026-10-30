@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+from dataclasses import dataclass
 from typing import Any
 
 from netbox_inventory_toolkit.inventory.util import InventoryError
@@ -17,10 +18,29 @@ from .base import Source, SourceState
 log = get_logger(__name__)
 
 IPMI_BINARY = os.environ.get("IPMI_TOOL", "ipmitool")
-IPMI_INTERFACE = os.environ.get("IPMI_INTERFACE", "lanplus")
-IPMI_PRIVILEGE = os.environ.get("IPMI_PRIVILEGE", "USER")
-IPMI_CIPHER = os.environ.get("IPMI_CIPHER", "")
-IPMI_TIMEOUT = float(os.environ.get("IPMI_TIMEOUT", "30"))
+
+
+@dataclass(frozen=True)
+class IpmiOptions:
+    binary: str = "ipmitool"
+    interface: str = "lanplus"
+    privilege: str = "USER"
+    cipher: str = ""
+    timeout: float = 30.0
+
+    @classmethod
+    def from_env(cls) -> IpmiOptions:
+        return cls(
+            binary=os.environ.get("IPMI_TOOL", "ipmitool"),
+            interface=os.environ.get("IPMI_INTERFACE", "lanplus"),
+            privilege=os.environ.get("IPMI_PRIVILEGE", "USER"),
+            cipher=os.environ.get("IPMI_CIPHER", ""),
+            timeout=float(os.environ.get("IPMI_TIMEOUT", "30")),
+        )
+
+
+def _options(value: IpmiOptions | None = None) -> IpmiOptions:
+    return value or IpmiOptions.from_env()
 
 
 def _sensor_status(status: str) -> str:
@@ -159,33 +179,35 @@ def _run(
     password: str,
     *args: str,
     timeout: float | None = None,
+    options: IpmiOptions | None = None,
 ) -> str | None:
-    binary = shutil.which(IPMI_BINARY)
+    options = _options(options)
+    binary = shutil.which(options.binary)
     if not binary:
         log.warning(
             "IPMI %s: %s is not installed; install ipmitool or set IPMI_TOOL",
             address,
-            IPMI_BINARY,
+            options.binary,
         )
         return None
     command = [
         binary,
         "-I",
-        IPMI_INTERFACE,
+        options.interface,
         "-H",
         address,
         "-U",
         username,
         "-E",
         "-L",
-        IPMI_PRIVILEGE,
+        options.privilege,
         "-N",
         "3",
         "-R",
         "1",
     ]
-    if IPMI_CIPHER:
-        command.extend(["-C", IPMI_CIPHER])
+    if options.cipher:
+        command.extend(["-C", options.cipher])
     command.extend(args)
     try:
         result = subprocess.run(
@@ -193,14 +215,14 @@ def _run(
             check=False,
             capture_output=True,
             text=True,
-            timeout=timeout if timeout is not None else IPMI_TIMEOUT,
+            timeout=timeout if timeout is not None else options.timeout,
             env={**os.environ, "IPMI_PASSWORD": password},
         )
     except subprocess.TimeoutExpired:
         log.warning(
             "IPMI %s: ipmitool timed out after %.0fs",
             address,
-            timeout if timeout is not None else IPMI_TIMEOUT,
+            timeout if timeout is not None else options.timeout,
         )
         return None
     except OSError as exc:
@@ -230,11 +252,21 @@ def probe_ipmi(
     password: str,
     *,
     timeout: float | None = None,
+    options: IpmiOptions | None = None,
 ) -> dict[str, Any] | None:
     """Read only FRU identity from an IPMI BMC."""
-    if not shutil.which(IPMI_BINARY):
+    options = _options(options)
+    if not shutil.which(options.binary):
         return None
-    fru_text = _run(address, username, password, "fru", "print", timeout=timeout)
+    fru_text = _run(
+        address,
+        username,
+        password,
+        "fru",
+        "print",
+        timeout=timeout,
+        options=options,
+    )
     if fru_text is None:
         return None
     system = parse_fru(fru_text)
@@ -243,18 +275,27 @@ def probe_ipmi(
     return {"system": system}
 
 
-def read_ipmi(address: str, username: str, password: str) -> dict[str, Any] | None:
+def read_ipmi(
+    address: str,
+    username: str,
+    password: str,
+    *,
+    options: IpmiOptions | None = None,
+) -> dict[str, Any] | None:
     """Read FRU identity and fan/PSU sensors from an IPMI BMC."""
-    if not shutil.which(IPMI_BINARY):
+    options = _options(options)
+    if not shutil.which(options.binary):
         log.warning(
             "IPMI %s: %s is not installed; install ipmitool or set IPMI_TOOL",
             address,
-            IPMI_BINARY,
+            options.binary,
         )
         return None
     log.debug("IPMI: reading %s", address)
-    fru_text = _run(address, username, password, "fru", "print")
-    sdr_text = _run(address, username, password, "sdr")
+    fru_text = _run(
+        address, username, password, "fru", "print", options=options
+    )
+    sdr_text = _run(address, username, password, "sdr", options=options)
     if fru_text is None and sdr_text is None:
         return None
 
@@ -293,15 +334,36 @@ def collect_ipmi(
     manual: dict[str, Any],
     resolver: Any,
     *,
-    username: str,
-    password: str,
+    username: str = "",
+    password: str = "",
+    options: IpmiOptions | None = None,
+    profile_for: Any = None,
 ) -> dict[str, dict[str, Any]]:
     result: dict[str, dict[str, Any]] = {}
     for device in manual.get("devices") or []:
         address = str(device.get("ipmi_ip") or "").strip()
         if not address:
             continue
-        data = read_ipmi(address, username, password)
+        if profile_for is not None:
+            profile = profile_for(device, address)
+            if profile is None:
+                continue
+            data = read_ipmi(
+                address,
+                profile.username,
+                profile.password,
+                options=IpmiOptions(
+                    binary=profile.binary,
+                    interface=profile.interface,
+                    privilege=profile.privilege,
+                    cipher=profile.cipher,
+                    timeout=profile.timeout,
+                ),
+            )
+        elif options is None:
+            data = read_ipmi(address, username, password)
+        else:
+            data = read_ipmi(address, username, password, options=options)
         if not data:
             continue
         system = data.get("system") or {}
@@ -328,11 +390,13 @@ class IpmiSource(Source):
     name = "ipmi"
 
     def enabled(self, ctx: Any, state: SourceState) -> bool:
-        options = ctx.options
+        config = ctx.config
+        if config is None:
+            return False
+        profiles = [profile for profile in config.ipmi if profile.enabled]
         return bool(
-            options.ipmi_user
-            and options.ipmi_pass
-            and shutil.which(IPMI_BINARY)
+            profiles
+            and any(shutil.which(profile.binary) for profile in profiles)
             and any(
                 device.get("ipmi_ip")
                 for device in ctx.manual.get("devices") or []
@@ -340,10 +404,21 @@ class IpmiSource(Source):
         )
 
     def collect(self, ctx: Any, state: SourceState) -> None:
-        options = ctx.options
+        config = ctx.config
+        if config is None:
+            return
+
+        def profile_for(device: dict[str, Any], address: str) -> Any:
+            try:
+                return config.ipmi_profile_for(device=device, address=address)
+            except InventoryError as exc:
+                log.warning(
+                    "IPMI %s (%s): %s", device.get("name") or address, address, exc
+                )
+                return None
+
         state.ipmi = collect_ipmi(
             ctx.manual,
             ctx.resolver,
-            username=options.ipmi_user,
-            password=options.ipmi_pass,
+            profile_for=profile_for,
         )

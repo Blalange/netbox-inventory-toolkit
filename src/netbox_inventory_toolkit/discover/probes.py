@@ -9,12 +9,23 @@ from typing import Any
 
 import requests
 
-from netbox_inventory_toolkit.collect.sources.ipmi import IPMI_BINARY, probe_ipmi
+from netbox_inventory_toolkit.collect.sources.ipmi import (
+    IPMI_BINARY,
+    IpmiOptions,
+    probe_ipmi,
+)
 from netbox_inventory_toolkit.collect.sources.snmp import probe_snmp
 
 from .models import DiscoveryOptions, ProbeResult, ScanTarget
 
 USER_AGENT = "netbox-inventory-toolkit/0.2"
+
+
+def _configured(options: DiscoveryOptions, protocol: str) -> list[Any]:
+    config = options.config
+    if config is None:
+        return []
+    return list(getattr(config, protocol, []))
 
 
 def available_protocols(options: DiscoveryOptions) -> tuple[list[str], list[str]]:
@@ -24,18 +35,56 @@ def available_protocols(options: DiscoveryOptions) -> tuple[list[str], list[str]
     for protocol in ("redfish", "snmp", "ipmi"):
         if protocol not in options.protocols:
             continue
+        configured = [profile for profile in _configured(options, protocol) if profile.enabled]
+        if options.config is not None and not configured:
+            warnings.append(
+                f"{protocol.upper()} skipped: no enabled credential profiles are configured"
+            )
+            continue
         if protocol == "snmp" and importlib.util.find_spec("pysnmp") is None:
             warnings.append("SNMP skipped: install the 'snmp' extra (pysnmp)")
             continue
         if protocol == "ipmi":
-            binary = shutil.which(options.ipmi_binary or IPMI_BINARY)
-            if binary is None:
+            binaries = [profile.binary for profile in configured] or [
+                options.ipmi_binary or IPMI_BINARY
+            ]
+            if not any(shutil.which(binary) for binary in binaries):
                 warnings.append(
-                    f"IPMI skipped: {options.ipmi_binary or IPMI_BINARY} was not found"
+                    f"IPMI skipped: {', '.join(binaries)} was not found"
                 )
                 continue
         available.append(protocol)
     return available, warnings
+
+
+def _select_profile(
+    options: DiscoveryOptions,
+    protocol: str,
+    target: ScanTarget,
+) -> Any:
+    config = options.config
+    if config is None:
+        return None
+    if protocol == "snmp":
+        return config.snmp_profile_for(
+            name=target.device_name,
+            site=target.site,
+            address=target.address,
+            explicit=options.snmp_credential,
+        )
+    if protocol == "redfish":
+        return config.redfish_profile_for(
+            name=target.device_name,
+            site=target.site,
+            address=target.address,
+            explicit=options.redfish_credential,
+        )
+    return config.ipmi_profile_for(
+        name=target.device_name,
+        site=target.site,
+        address=target.address,
+        explicit=options.ipmi_credential,
+    )
 
 
 def _redfish_get(
@@ -61,19 +110,27 @@ def _first_member(collection: dict[str, Any] | None) -> str:
     return ""
 
 
-def _probe_redfish(address: str, options: DiscoveryOptions) -> ProbeResult:
+def _probe_redfish(
+    address: str,
+    options: DiscoveryOptions,
+    profile: Any = None,
+) -> ProbeResult:
     base = f"https://{address}"
+    verify = profile.verify_tls if profile is not None else options.redfish_verify
+    timeout = profile.timeout if profile is not None else options.timeout
     with requests.Session() as session:
-        session.verify = options.redfish_verify
+        session.verify = verify
         session.headers.update({"Accept": "application/json", "User-Agent": USER_AGENT})
-        if options.redfish_auth and options.redfish_user and options.redfish_pass:
+        if profile is not None:
+            session.auth = (profile.username, profile.password)
+        elif options.redfish_auth and options.redfish_user and options.redfish_pass:
             session.auth = (options.redfish_user, options.redfish_pass)
-        if not options.redfish_verify:
+        if not verify:
             import urllib3
 
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         try:
-            response = session.get(f"{base}/redfish/v1", timeout=options.timeout)
+            response = session.get(f"{base}/redfish/v1", timeout=timeout)
         except requests.RequestException as exc:
             return ProbeResult(protocol="redfish", address=address, error=str(exc))
         if response.status_code in {401, 403}:
@@ -112,11 +169,11 @@ def _probe_redfish(address: str, options: DiscoveryOptions) -> ProbeResult:
             session,
             base,
             systems_url or "/redfish/v1/Systems",
-            timeout=options.timeout,
+            timeout=timeout,
         )
         system_url = _first_member(collection)
         system = (
-            _redfish_get(session, base, system_url, timeout=options.timeout)
+            _redfish_get(session, base, system_url, timeout=timeout)
             if system_url
             else None
         )
@@ -147,12 +204,16 @@ def _probe_redfish(address: str, options: DiscoveryOptions) -> ProbeResult:
         )
 
 
-async def _probe_snmp_target(address: str, options: DiscoveryOptions) -> ProbeResult:
+async def _probe_snmp_target(
+    address: str,
+    options: DiscoveryOptions,
+    profile: Any = None,
+) -> ProbeResult:
     data = await probe_snmp(
         address,
-        community=options.snmp_community,
-        timeout=options.snmp_timeout,
-        retries=options.snmp_retries,
+        community=profile.community if profile is not None else options.snmp_community,
+        timeout=profile.timeout if profile is not None else options.snmp_timeout,
+        retries=profile.retries if profile is not None else options.snmp_retries,
     )
     if not data:
         return ProbeResult(
@@ -175,13 +236,32 @@ async def _probe_snmp_target(address: str, options: DiscoveryOptions) -> ProbeRe
     )
 
 
-def _probe_ipmi_target(address: str, options: DiscoveryOptions) -> ProbeResult:
-    data = probe_ipmi(
-        address,
-        options.ipmi_user or "",
-        options.ipmi_pass or "",
-        timeout=options.ipmi_timeout,
-    )
+def _probe_ipmi_target(
+    address: str,
+    options: DiscoveryOptions,
+    profile: Any = None,
+) -> ProbeResult:
+    if profile is not None:
+        data = probe_ipmi(
+            address,
+            profile.username,
+            profile.password,
+            timeout=profile.timeout,
+            options=IpmiOptions(
+                binary=profile.binary,
+                interface=profile.interface,
+                privilege=profile.privilege,
+                cipher=profile.cipher,
+                timeout=profile.timeout,
+            ),
+        )
+    else:
+        data = probe_ipmi(
+            address,
+            options.ipmi_user or "",
+            options.ipmi_pass or "",
+            timeout=options.ipmi_timeout,
+        )
     if not data:
         return ProbeResult(protocol="ipmi", address=address, error="no IPMI response")
     system = data.get("system") or {}
@@ -208,17 +288,37 @@ async def probe_targets(
     if not protocols:
         return [], warnings
 
+    profiles: dict[tuple[str, str], Any] = {}
+    if options.config is not None:
+        for target in targets:
+            for protocol in protocols:
+                try:
+                    profiles[(target.address, protocol)] = _select_profile(
+                        options, protocol, target
+                    )
+                except Exception as exc:  # noqa: BLE001 - discovery is best effort
+                    warnings.append(
+                        f"{protocol.upper()} {target.address}: {exc}"
+                    )
+
     semaphore = asyncio.Semaphore(max(1, options.concurrency))
 
     async def run(target: ScanTarget, protocol: str) -> ProbeResult | None:
         if protocol == "ipmi" and target.source == "network" and not options.ipmi_cidr_scan:
             return None
+        if options.config is not None and (target.address, protocol) not in profiles:
+            return None
+        profile = profiles.get((target.address, protocol))
         async with semaphore:
             if protocol == "redfish":
-                return await asyncio.to_thread(_probe_redfish, target.address, options)
+                return await asyncio.to_thread(
+                    _probe_redfish, target.address, options, profile
+                )
             if protocol == "snmp":
-                return await _probe_snmp_target(target.address, options)
-            return await asyncio.to_thread(_probe_ipmi_target, target.address, options)
+                return await _probe_snmp_target(target.address, options, profile)
+            return await asyncio.to_thread(
+                _probe_ipmi_target, target.address, options, profile
+            )
 
     tasks = [
         run(target, protocol)

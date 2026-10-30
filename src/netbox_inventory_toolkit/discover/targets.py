@@ -48,7 +48,13 @@ def expand_targets(
     excluded_addresses, excluded_networks = _parse_excludes(options.excludes)
     targets: dict[str, ScanTarget] = {}
 
-    def add(address: str, source: str) -> None:
+    def add(
+        address: str,
+        source: str,
+        *,
+        site: str = "",
+        device_name: str = "",
+    ) -> None:
         normalized = str(ipaddress.ip_address(address))
         if normalized in excluded_addresses:
             return
@@ -56,7 +62,12 @@ def expand_targets(
             return
         current = targets.get(normalized)
         if current is None or _SOURCE_PRIORITY[source] > _SOURCE_PRIORITY[current.source]:
-            targets[normalized] = ScanTarget(address=normalized, source=source)
+            targets[normalized] = ScanTarget(
+                address=normalized,
+                source=source,
+                site=site,
+                device_name=device_name,
+            )
 
     for value in _split_values(options.targets):
         try:
@@ -84,7 +95,12 @@ def expand_targets(
             ):
                 if address:
                     try:
-                        add(address, "inventory")
+                        add(
+                            address,
+                            "inventory",
+                            site=device.site,
+                            device_name=device.name,
+                        )
                     except ValueError:
                         continue
 

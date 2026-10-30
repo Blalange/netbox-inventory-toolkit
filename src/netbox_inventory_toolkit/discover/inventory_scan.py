@@ -93,6 +93,7 @@ def _snapshot(device: dict[str, Any], layer: str) -> DeviceSnapshot:
         unifi_ip=str(device.get("unifi_ip") or ""),
         unifi_mac=str(device.get("unifi_mac") or ""),
         talos_node=str(device.get("talos_node") or ""),
+        talos_cluster=str(device.get("talos_cluster") or ""),
         description=str(device.get("description") or ""),
         tags=[str(tag) for tag in as_list(device.get("tags"))],
         macs=macs,
@@ -118,6 +119,7 @@ def _merge_device(manual: DeviceSnapshot, generated: DeviceSnapshot) -> DeviceSn
         "unifi_ip",
         "unifi_mac",
         "talos_node",
+        "talos_cluster",
         "description",
     ):
         if not getattr(merged, field):

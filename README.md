@@ -21,7 +21,7 @@ without UniFi, and a manual-only inventory works without any live source.
 Use `uv` to run a pinned release without installing anything globally:
 
 ```sh
-uvx --python 3.13 --from "netbox-inventory-toolkit[all]==0.2.1" \
+uvx --python 3.13 --from "netbox-inventory-toolkit[all]==0.3.0" \
   netbox-inventory-toolkit --help
 ```
 
@@ -49,11 +49,34 @@ netbox-inventory-toolkit sync --inventory examples/minimal --check --no-dtl
 The collector reads `snmp_ip` and `ipmi_ip` from manual device entries. No
 UniFi controller or Kubernetes cluster is required.
 
+For anything beyond a single credential, create `inventory/settings.yml`:
+
+```yaml
+version: 1
+defaults:
+  site: example
+sources:
+  snmp:
+    - name: default
+      community: {from_env: SNMP_COMMUNITY, default: public}
+      default: true
+  ipmi:
+    - name: default
+      username: {from_env: IPMI_USER, default: root}
+      password: {from_env: IPMI_PASS, default: calvin}
+      default: true
+```
+
+See [docs/configuration.md](docs/configuration.md) for multiple UniFi
+controllers, Talos clusters, SNMP communities and Redfish/IPMI credentials.
+
 ## Commands
 
 ```text
 netbox-inventory-toolkit discover --inventory inventory
 netbox-inventory-toolkit discover --inventory inventory --network 192.0.2.1/24 --protocols redfish,snmp
+netbox-inventory-toolkit config check --inventory inventory
+netbox-inventory-toolkit config show --inventory inventory
 netbox-inventory-toolkit collect --inventory inventory [--sources auto|all|none|list]
 netbox-inventory-toolkit sync --inventory inventory --check
 netbox-inventory-toolkit sync --inventory inventory --dry-run --prune
@@ -72,11 +95,14 @@ never edits existing files. See [docs/discovery.md](docs/discovery.md).
 
 | Source | Configuration |
 |---|---|
-| UniFi | `UNIFI_URL`, `UNIFI_USER`, `UNIFI_PASS` or `--unifi-secret NAMESPACE/NAME` |
-| SNMP | manual devices with `snmp_ip`; optional `--snmp-community` |
-| Talos | a working `kubectl`, `--nodes-json`, and optional `--talosctl` |
-| Redfish | manual devices with `redfish_ip`; `REDFISH_USER` / `REDFISH_PASS` |
-| IPMI | manual devices with `ipmi_ip`; `ipmitool` and `IPMI_USER` / `IPMI_PASS` |
+| UniFi | one or more `sources.unifi` profiles (`url`, credentials, `site`) |
+| SNMP | one or more `sources.snmp` profiles (`community` plus optional `match`) |
+| Talos | one or more `sources.talos` profiles (`kubeconfig`, `talosconfig`, tools) |
+| Redfish | one or more `sources.redfish` credential profiles |
+| IPMI | one or more `sources.ipmi` credential profiles |
+
+Old flags and environment variables are still accepted when no
+`settings.yml` exists, but they are deprecated and log a warning.
 
 Optional Python extras:
 
@@ -103,7 +129,7 @@ natural keys and provenance tags.
 The release workflow publishes:
 
 ```text
-ghcr.io/blalange/netbox-inventory-toolkit:v0.2.1
+ghcr.io/blalange/netbox-inventory-toolkit:v0.3.0
 ```
 
 The release workflow tries to make the GHCR package public. If it remains
@@ -117,7 +143,7 @@ cache/media volume at `/media`:
 ```yaml
 containers:
   - name: sync
-    image: ghcr.io/blalange/netbox-inventory-toolkit:v0.2.1
+    image: ghcr.io/blalange/netbox-inventory-toolkit:v0.3.0
     command: ["netbox-inventory-toolkit", "sync"]
     env:
       - name: NETBOX_URL

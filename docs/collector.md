@@ -8,6 +8,11 @@ The collector reads the manual inventory, runs the enabled sources, and writes:
 
 It never edits `manual/`.
 
+Collector endpoints, credentials and multi-source settings live in
+`inventory/settings.yml`; see [configuration.md](configuration.md). Legacy
+flags and environment variables still work without that file, but are
+deprecated and log a warning.
+
 ## Source selection
 
 ```sh
@@ -24,7 +29,7 @@ netbox-inventory-toolkit collect --inventory inventory --sources none
   unconfigured source is an error.
 
 Per-source flags: `--no-unifi`, `--no-snmp`, `--no-talos`, `--no-redfish`,
-`--no-ipmi`.
+`--no-ipmi`. These override `collector.sources` and remain supported.
 
 ## SNMP
 
@@ -55,7 +60,7 @@ enrichment by default. This fills VLAN membership for devices that are generated
 from UniFi but have no manual `snmp_ip`. Disable it with:
 
 ```yaml
-settings:
+collector:
   snmp:
     auto_unifi: false
 ```
@@ -63,9 +68,19 @@ settings:
 Uplink entries may set `interface_type` to override the interface type inferred
 from the cable `type` (for example `dac-passive` → `10gbase-x-sfpp`).
 
-SNMP v2c defaults to community `public`. Set `SNMP_COMMUNITY`,
-`--snmp-community`, `SNMP_TIMEOUT` and `SNMP_RETRIES` as needed.
-`--snmp-report PATH` writes raw observations for troubleshooting.
+SNMP v2c communities and timeouts are configured with one or more
+`sources.snmp` profiles. A device can select a profile explicitly:
+
+```yaml
+- name: old-switch
+  snmp_ip: 192.0.2.10
+  snmp_credential: legacy
+```
+
+Profiles may also select devices with `match` rules and one profile may be the
+`default`. Targets are grouped by profile, so every device is polled with the
+right community exactly once. `--snmp-report PATH` writes raw observations for
+troubleshooting.
 
 ## IPMI
 
@@ -78,9 +93,10 @@ Devices with `ipmi_ip` are read with `ipmitool`:
   ipmi_ip: 192.0.2.20
 ```
 
-Credentials: `IPMI_USER` / `IPMI_PASS` (defaults `root` / `calvin`).
-`IPMI_TOOL`, `IPMI_INTERFACE`, `IPMI_PRIVILEGE`, `IPMI_CIPHER` and
-`IPMI_TIMEOUT` control the client. IPMI supplies FRU identity plus fan and PSU
+Credentials and client options come from `sources.ipmi` profiles. Devices can
+select one with `ipmi_credential`; otherwise `match` and `default` rules apply.
+Each profile supports `username`, `password`, `binary`, `interface`,
+`privilege`, `cipher` and `timeout`. IPMI supplies FRU identity plus fan and PSU
 sensors; CPU, memory and disks still come from Talos or the manual layer.
 
 ## Redfish
@@ -97,20 +113,20 @@ Devices with `redfish_ip` are read over Redfish:
 
 The adapter discovers the first system and chassis from the Redfish root, then
 reads processors, memory, storage, thermal and power collections. Dell OEM
-fields are used as optional fallbacks. Credentials: `REDFISH_USER` /
-`REDFISH_PASS` (defaults `readonly` / `readonly`). `REDFISH_VERIFY=true` enables
-TLS verification; `REDFISH_SYSTEM_PATH` and `REDFISH_CHASSIS_PATH` override
-discovery.
+fields are used as optional fallbacks. Credentials and TLS settings come from
+`sources.redfish` profiles; devices may select one with `redfish_credential`.
+`system_path` and `chassis_path` override standard collection discovery.
 
 ## Talos / Kubernetes
 
-Talos is enabled when `kubectl` is available or `--nodes-json` is provided.
-`--talosctl` adds hardware discovery (CPU, memory, disks, link MACs).
-Endpoints are taken from the Kubernetes `InternalIP`; no hostname pattern is
-assumed. `--talos-config-dir` optionally points at Talos node YAML files for
-bond/interface details.
+Each `sources.talos` profile is one cluster. It may set `kubeconfig`,
+`talosconfig`, `kubectl`, `talosctl`, `nodes_json` and `config_dir`. `talosctl`
+adds hardware discovery (CPU, memory, disks, link MACs). Endpoints are taken
+from the Kubernetes `InternalIP`; no hostname pattern is assumed.
 
-Roles and platform come from the manual device first, then from:
+Manual devices may set `talos_cluster` to select the profile. This is required
+when the same node name exists in more than one cluster. Roles and platform
+come from the manual device first, then from:
 
 ```yaml
 settings:
@@ -122,19 +138,28 @@ settings:
 
 ## UniFi
 
-UniFi is optional. It is enabled when `UNIFI_URL` and credentials are present:
+UniFi is optional. Each `sources.unifi` profile is one controller and one
+UniFi site (`unifi_site`, default `default`). Give each profile a NetBox `site`.
+Multiple profiles can use the same controller URL with different `unifi_site`
+values, or point at different controllers.
 
-```sh
-UNIFI_URL=https://unifi.example \
-UNIFI_USER=... UNIFI_PASS=... \
-netbox-inventory-toolkit collect --inventory inventory --sources unifi,snmp
+Credentials may be literal values, environment references, files or
+Kubernetes Secrets:
+
+```yaml
+sources:
+  unifi:
+    - name: glemmen
+      url: https://unifi.example
+      site: glemmen
+      username: {from_k8s_secret: monitoring/unpoller-unifi#username}
+      password: {from_k8s_secret: monitoring/unpoller-unifi#password}
+      snmp_credential: glemmen
 ```
 
-Credentials can also be read from a Kubernetes Secret with
-`--unifi-secret NAMESPACE/NAME` (keys `username` and `password`).
-
-`unifi_models` maps controller model codes to device types, and
-`unifi_vlan_names` corrects VLAN names. Both live in the manual inventory.
+`defaults.unifi_models` maps controller model codes to device types, and
+`defaults.unifi_vlan_names` corrects VLAN names. Both can be overridden per
+profile.
 
 ## Logging
 

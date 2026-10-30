@@ -38,9 +38,11 @@ def _redfish_session(
     return session
 
 
-def _redfish_get(session: requests.Session, base: str, path: str) -> dict | None:
+def _redfish_get(
+    session: requests.Session, base: str, path: str, *, timeout: float = 30
+) -> dict | None:
     try:
-        response = session.get(f"{base}{path}", timeout=30)
+        response = session.get(f"{base}{path}", timeout=timeout)
     except requests.RequestException as exc:
         log.warning("Redfish %s%s: %s", base, path, exc)
         return None
@@ -67,12 +69,14 @@ def _discover_url(
     base: str,
     collection_name: str,
     fallback: str,
+    *,
+    timeout: float = 30,
 ) -> str:
-    root = _redfish_get(session, base, "/redfish/v1") or {}
+    root = _redfish_get(session, base, "/redfish/v1", timeout=timeout) or {}
     collection_url = ((root.get(collection_name) or {}).get("@odata.id")) or ""
     if not collection_url:
         collection_url = f"/redfish/v1/{collection_name}"
-    collection = _redfish_get(session, base, collection_url)
+    collection = _redfish_get(session, base, collection_url, timeout=timeout)
     member = _first_member(session, base, collection)
     if member:
         return member
@@ -80,15 +84,19 @@ def _discover_url(
 
 
 def _members(
-    session: requests.Session, base: str, collection_url: str
+    session: requests.Session,
+    base: str,
+    collection_url: str,
+    *,
+    timeout: float = 30,
 ) -> list[dict[str, Any]]:
-    collection = _redfish_get(session, base, collection_url)
+    collection = _redfish_get(session, base, collection_url, timeout=timeout)
     result: list[dict[str, Any]] = []
     for member in (collection or {}).get("Members", []) or []:
         path = member.get("@odata.id") if isinstance(member, dict) else None
         if not path:
             continue
-        data = _redfish_get(session, base, str(path))
+        data = _redfish_get(session, base, str(path), timeout=timeout)
         if data:
             result.append(data)
     return result
@@ -100,6 +108,9 @@ def read_redfish(
     password: str,
     *,
     verify: bool | None = None,
+    timeout: float = 30.0,
+    system_path: str | None = None,
+    chassis_path: str | None = None,
 ) -> dict[str, Any] | None:
     """Read CPU, memory, disk, fan and PSU data from a Redfish BMC."""
     session = _redfish_session(username, password, verify=verify)
@@ -107,9 +118,10 @@ def read_redfish(
         session,
         base,
         "Systems",
-        os.environ.get("REDFISH_SYSTEM_PATH", DEFAULT_SYSTEM_URL),
+        system_path or os.environ.get("REDFISH_SYSTEM_PATH", DEFAULT_SYSTEM_URL),
+        timeout=timeout,
     )
-    system = _redfish_get(session, base, system_url)
+    system = _redfish_get(session, base, system_url, timeout=timeout)
     if not system:
         return None
     result: dict[str, Any] = {
@@ -124,7 +136,9 @@ def read_redfish(
     processors_url = ((system.get("Processors") or {}).get("@odata.id")) or (
         f"{system_url}/Processors"
     )
-    for index, data in enumerate(_members(session, base, str(processors_url)), 1):
+    for index, data in enumerate(
+        _members(session, base, str(processors_url), timeout=timeout), 1
+    ):
         oem = ((data.get("Oem") or {}).get("Dell") or {}).get("DellProcessor") or {}
         result["cpu"].append(
             {
@@ -151,7 +165,9 @@ def read_redfish(
     memory_url = ((system.get("Memory") or {}).get("@odata.id")) or (
         f"{system_url}/Memory"
     )
-    for index, data in enumerate(_members(session, base, str(memory_url)), 1):
+    for index, data in enumerate(
+        _members(session, base, str(memory_url), timeout=timeout), 1
+    ):
         if not data.get("CapacityMiB"):
             continue
         result["memory"].append(
@@ -184,12 +200,12 @@ def read_redfish(
         f"{system_url}/Storage"
     )
     seen_disks: set[str] = set()
-    for controller in _members(session, base, str(storage_url)):
+    for controller in _members(session, base, str(storage_url), timeout=timeout):
         for drive_ref in controller.get("Drives", []) or []:
             path = drive_ref.get("@odata.id") if isinstance(drive_ref, dict) else None
             if not path:
                 continue
-            data = _redfish_get(session, base, str(path))
+            data = _redfish_get(session, base, str(path), timeout=timeout)
             if not data:
                 continue
             key = str(data.get("SerialNumber") or data.get("Id") or "")
@@ -221,11 +237,15 @@ def read_redfish(
         session,
         base,
         "Chassis",
-        os.environ.get(
+        chassis_path
+        or os.environ.get(
             "REDFISH_CHASSIS_PATH", "/redfish/v1/Chassis/System.Embedded.1"
         ),
+        timeout=timeout,
     )
-    thermal = _redfish_get(session, base, f"{chassis_url}/Thermal")
+    thermal = _redfish_get(
+        session, base, f"{chassis_url}/Thermal", timeout=timeout
+    )
     for index, fan in enumerate((thermal or {}).get("Fans", []), 1):
         result["fans"].append(
             {
@@ -238,7 +258,7 @@ def read_redfish(
             }
         )
 
-    power = _redfish_get(session, base, f"{chassis_url}/Power")
+    power = _redfish_get(session, base, f"{chassis_url}/Power", timeout=timeout)
     for index, psu in enumerate((power or {}).get("PowerSupplies", []), 1):
         result["psus"].append(
             {
@@ -270,10 +290,10 @@ class RedfishSource(Source):
     name = "redfish"
 
     def enabled(self, ctx: Any, state: SourceState) -> bool:
-        options = ctx.options
+        config = ctx.config
         return bool(
-            options.redfish_user
-            and options.redfish_pass
+            config
+            and [profile for profile in config.redfish if profile.enabled]
             and any(
                 device.get("redfish_ip")
                 for device in ctx.manual.get("devices") or []
@@ -281,16 +301,28 @@ class RedfishSource(Source):
         )
 
     def collect(self, ctx: Any, state: SourceState) -> None:
-        options = ctx.options
+        config = ctx.config
+        if config is None:
+            return
         for device in ctx.manual.get("devices") or []:
             address = str(device.get("redfish_ip") or "").strip()
             if not address:
                 continue
+            try:
+                profile = config.redfish_profile_for(device=device, address=address)
+            except InventoryError as exc:
+                log.warning(
+                    "Redfish %s (%s): %s", device.get("name") or address, address, exc
+                )
+                continue
             data = read_redfish(
                 f"https://{address}",
-                options.redfish_user,
-                options.redfish_pass,
-                verify=options.redfish_verify,
+                profile.username,
+                profile.password,
+                verify=profile.verify_tls,
+                timeout=profile.timeout,
+                system_path=profile.system_path,
+                chassis_path=profile.chassis_path,
             )
             if not data:
                 continue

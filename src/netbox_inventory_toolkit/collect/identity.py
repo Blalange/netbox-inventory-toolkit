@@ -33,6 +33,12 @@ def normalize_ref(kind: str, value: Any) -> str:
         return text.upper()
     if kind == "snmp_name":
         return re.sub(r"[^a-z0-9]", "", text.lower())
+    if kind == "talos_cluster_node":
+        cluster, separator, node = text.partition("/")
+        if separator:
+            return f"{cluster.strip().lower()}/{node.strip()}"
+    if kind == "talos_cluster":
+        return text.lower()
     return text
 
 
@@ -72,8 +78,16 @@ class DeviceResolver:
             self.add_claim("name", name, name)
             for field, kind in self._FIELDS.items():
                 value = device.get(field)
-                if value:
-                    self.add_claim(kind, value, name)
+                if not value:
+                    continue
+                if kind == "talos_node":
+                    cluster = str(device.get("talos_cluster") or "").strip()
+                    if cluster:
+                        self.add_claim(
+                            "talos_cluster_node", f"{cluster}/{value}", name
+                        )
+                        continue
+                self.add_claim(kind, value, name)
 
     def add_claim(self, kind: str, value: Any, device_name: str) -> None:
         normalized = normalize_ref(kind, value)

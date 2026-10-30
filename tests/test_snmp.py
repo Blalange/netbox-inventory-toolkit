@@ -342,20 +342,151 @@ def test_snmp_source_includes_active_unifi_targets(monkeypatch) -> None:
     }
     ctx = CollectContext(CollectOptions(), manual, DeviceResolver(manual))
     state = SourceState(
-        unifi=UnifiData(
-            raw_devices=[
-                {
-                    "state": 1,
-                    "lan_ip": "192.0.2.30",
-                    "mac": "AA:BB:CC:DD:EE:FF",
-                }
-            ],
-            names={"AA:BB:CC:DD:EE:FF": "ap-01"},
-        )
+        unifi=[
+            UnifiData(
+                site="example",
+                raw_devices=[
+                    {
+                        "state": 1,
+                        "lan_ip": "192.0.2.30",
+                        "mac": "AA:BB:CC:DD:EE:FF",
+                    }
+                ],
+                names={"AA:BB:CC:DD:EE:FF": "ap-01"},
+            )
+        ]
     )
 
     snmp_source.SnmpSource().collect(ctx, state)
 
     assert captured["targets"] == [
-        {"ip": "192.0.2.30", "name": "ap-01", "source": "unifi"}
+        {
+            "ip": "192.0.2.30",
+            "name": "ap-01",
+            "site": "example",
+            "source": "unifi",
+            "device": None,
+            "credential": "default",
+        }
     ]
+
+
+def test_snmp_source_groups_targets_by_community(monkeypatch) -> None:
+    from netbox_inventory_toolkit.collect.context import CollectContext, CollectOptions
+    from netbox_inventory_toolkit.collect.identity import DeviceResolver
+    from netbox_inventory_toolkit.collect.settings import (
+        CollectorConfig,
+        Defaults,
+        SnmpProfile,
+    )
+    from netbox_inventory_toolkit.collect.sources import snmp as snmp_source
+    from netbox_inventory_toolkit.collect.sources.base import SourceState
+
+    calls: list[tuple[str, list[dict]]] = []
+
+    async def fake_collect(targets, **kwargs):
+        calls.append((kwargs["community"], targets))
+        return []
+
+    monkeypatch.setattr(snmp_source, "collect_snmp", fake_collect)
+    manual = {
+        "settings": {"site": "example"},
+        "devices": [
+            {"name": "new-switch", "snmp_ip": "192.0.2.10"},
+            {
+                "name": "old-switch",
+                "snmp_ip": "192.0.2.11",
+                "snmp_credential": "legacy",
+            },
+        ],
+    }
+    config = CollectorConfig(
+        defaults=Defaults(site="example"),
+        snmp=[
+            SnmpProfile(name="default", community="public", default=True),
+            SnmpProfile(name="legacy", community="private"),
+        ],
+    )
+    ctx = CollectContext(
+        CollectOptions(), manual, DeviceResolver(manual), config=config
+    )
+
+    snmp_source.SnmpSource().collect(ctx, SourceState())
+
+    by_community = {
+        community: [target["name"] for target in targets]
+        for community, targets in calls
+    }
+    assert by_community == {
+        "public": ["new-switch"],
+        "private": ["old-switch"],
+    }
+
+
+def test_snmp_vlans_are_scoped_per_site() -> None:
+    manual = {
+        "settings": {"site": "default"},
+        "devices": [
+            {
+                "name": "switch-a",
+                "site": "site-a",
+                "role": "switch",
+                "device_type": "generic-switch",
+                "snmp_ip": "192.0.2.10",
+                "snmp_interfaces": True,
+            },
+            {
+                "name": "switch-b",
+                "site": "site-b",
+                "role": "switch",
+                "device_type": "generic-switch",
+                "snmp_ip": "192.0.2.11",
+                "snmp_interfaces": True,
+            },
+        ],
+    }
+    resolver = DeviceResolver(manual)
+
+    def observation(address: str, site: str) -> dict:
+        return {
+            "ip": address,
+            "site": site,
+            "sys": {"name": address},
+            "base_mac": "00:11:22:33:44:55",
+            "serial": "",
+            "vlans": {4: "Servers"},
+            "interface_vlans": {1: {"untagged": [4], "tagged": []}},
+            "interfaces": [
+                {
+                    "if_index": 1,
+                    "name": "Port 1",
+                    "alias": "",
+                    "descr": "Port 1",
+                    "type": 6,
+                    "mtu": 1500,
+                    "mac": "00:11:22:33:44:55",
+                    "admin_status": 1,
+                    "oper_status": 1,
+                    "speed": 1000,
+                    "candidates": ["Port 1"],
+                }
+            ],
+            "lldp": [],
+            "fdb": [],
+        }
+
+    devices: list[dict] = []
+    vlans: list[dict] = []
+    merge_snmp_observations(
+        devices,
+        vlans,
+        [observation("192.0.2.10", "site-a"), observation("192.0.2.11", "site-b")],
+        resolver,
+        manual,
+        default_site="default",
+    )
+
+    assert {(vlan["site"], vlan["vid"]) for vlan in vlans} == {
+        ("site-a", 4),
+        ("site-b", 4),
+    }

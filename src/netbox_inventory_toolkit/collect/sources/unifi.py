@@ -18,30 +18,44 @@ from .base import Source, SourceState, UnifiData
 log = get_logger(__name__)
 
 
-def unifi_get(base: str, username: str, password: str) -> tuple[list[dict], list[dict], list[dict]]:
+def unifi_get(
+    base: str,
+    username: str,
+    password: str,
+    *,
+    site: str = "default",
+    verify_tls: bool = True,
+    timeout: float = 30.0,
+) -> tuple[list[dict], list[dict], list[dict]]:
     session = requests.Session()
+    session.verify = verify_tls
+    if not verify_tls:
+        import urllib3
+
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
     session.headers.update({"User-Agent": "netbox-inventory-toolkit/0.1"})
-    log.debug("UniFi: logging in to %s", base)
+    log.debug("UniFi: logging in to %s (site %s)", base, site)
     login = session.post(
         f"{base}/api/auth/login",
         json={"username": username, "password": password, "remember": True},
-        timeout=30,
+        timeout=timeout,
     )
     if login.status_code != 200:
         raise InventoryError(
             f"UniFi login failed: HTTP {login.status_code}: {login.text[:300]}"
         )
 
+    site_path = f"{base}/proxy/network/api/s/{site}"
     devices_response = session.get(
-        f"{base}/proxy/network/api/s/default/stat/device", timeout=60
+        f"{site_path}/stat/device", timeout=timeout * 2
     )
     devices_response.raise_for_status()
     networks_response = session.get(
-        f"{base}/proxy/network/api/s/default/rest/networkconf", timeout=60
+        f"{site_path}/rest/networkconf", timeout=timeout * 2
     )
     networks_response.raise_for_status()
     clients_response = session.get(
-        f"{base}/proxy/network/api/s/default/stat/sta", timeout=60
+        f"{site_path}/stat/sta", timeout=timeout * 2
     )
     clients_response.raise_for_status()
     devices = devices_response.json().get("data") or []
@@ -102,6 +116,11 @@ def build_unifi(
     devices: list[dict],
     networks: list[dict],
     manual: dict[str, Any],
+    *,
+    site: str | None = None,
+    tag: str | None = None,
+    models: dict[str, str] | None = None,
+    vlan_names: dict[int, str] | None = None,
 ) -> tuple[list[dict], list[dict], list[dict], list[dict], dict[str, str]]:
     raw_names = [
         (d.get("name") or d.get("hostname") or f"UniFi device {str(d.get('mac') or '')[-4:]}").strip()
@@ -130,10 +149,10 @@ def build_unifi(
         else:
             names[mac] = unifi_device_name(device, counts)
     by_mac = {str(d.get("mac")).upper(): d for d in devices}
-    model_map = manual.get("unifi_models") or {}
+    model_map = models if models is not None else (manual.get("unifi_models") or {})
     device_types = manual.get("device_types_by_slug") or {}
-    site_slug = require_site(manual)
-    tag = default_tag(manual)
+    site_slug = site or require_site(manual)
+    tag_name = tag or default_tag(manual)
 
     unifi_devices: list[dict] = []
     cables: list[dict] = []
@@ -143,6 +162,11 @@ def build_unifi(
         mac = str(d.get("mac") or "").upper()
         name = names[mac]
         model = str(d.get("model") or "")
+        serial = str(d.get("serial") or "").strip().upper()
+        manual_device = manual_by_serial.get(serial)
+        if manual_device is None and mac:
+            manual_device = manual_by_mac.get(normalize_mac(mac))
+        device_site = str((manual_device or {}).get("site") or site_slug)
         slug = model_map.get(model) or f"ubiquiti-{slugify(model or 'unifi-device')}"
         device_type = device_types.get(slug) or {}
         model_name = device_type.get("model") or model or "UniFi device"
@@ -263,14 +287,14 @@ def build_unifi(
         unifi_devices.append(
             {
                 "name": name,
-                "site": site_slug,
+                "site": device_site,
                 "role": role,
                 "device_type": slug,
                 "platform": "unifi",
                 "status": unifi_status(d),
                 "serial": d.get("serial") or "",
                 "description": description,
-                "tags": [tag],
+                "tags": [tag_name],
                 "sources": ["unifi"],
                 "interfaces": interfaces,
             }
@@ -309,9 +333,21 @@ def build_unifi(
             }
         )
 
-    # UniFi VLAN names that need correction are configured in the manual layer.
-    vlan_names = {int(key): str(value) for key, value in (manual.get("unifi_vlan_names") or {}).items()}
-    vlans, prefixes = build_networks(networks, next((d for d in devices if d.get("type") == "udm"), None), vlan_names, site_slug)
+    # VLAN names can be corrected globally or per UniFi profile.
+    vlan_name_map = (
+        vlan_names
+        if vlan_names is not None
+        else {
+            int(key): str(value)
+            for key, value in (manual.get("unifi_vlan_names") or {}).items()
+        }
+    )
+    vlans, prefixes = build_networks(
+        networks,
+        next((d for d in devices if d.get("type") == "udm"), None),
+        vlan_name_map,
+        site_slug,
+    )
     log.debug(
         "UniFi build: devices=%d, cables=%d, vlans=%d, prefixes=%d",
         len(unifi_devices),
@@ -430,46 +466,74 @@ class UnifiSource(Source):
     name = "unifi"
 
     def enabled(self, ctx: Any, state: SourceState) -> bool:
-        options = ctx.options
-        return bool(
-            options.unifi_url
-            and (
-                options.unifi_secret
-                or (options.unifi_user and options.unifi_pass)
-            )
-        )
+        config = ctx.config
+        return bool(config and [profile for profile in config.unifi if profile.enabled])
 
     def collect(self, ctx: Any, state: SourceState) -> None:
-        options = ctx.options
-        username = options.unifi_user or ""
-        password = options.unifi_pass or ""
-        if options.unifi_secret:
-            namespace, _, secret_name = options.unifi_secret.partition("/")
-            if not namespace or not secret_name:
-                raise ValueError(
-                    "--unifi-secret must be NAMESPACE/NAME, for example monitoring/unifi"
+        config = ctx.config
+        if config is None:
+            return
+        errors: list[Exception] = []
+        for profile in config.unifi:
+            if not profile.enabled:
+                continue
+            username = profile.username
+            password = profile.password
+            if profile.secret:
+                namespace, _, secret_name = profile.secret.partition("/")
+                if not namespace or not secret_name:
+                    raise InventoryError(
+                        "UniFi secret must be NAMESPACE/NAME, "
+                        "for example monitoring/unifi"
+                    )
+                username, password = read_cluster_secret(
+                    config.kubectl,
+                    config.kubeconfig,
+                    namespace,
+                    secret_name,
                 )
-            username, password = read_cluster_secret(
-                options.kubectl,
-                options.kubeconfig,
-                namespace,
-                secret_name,
+            if not username or not password:
+                raise InventoryError(
+                    f"UniFi profile {profile.name!r} has no credentials"
+                )
+            try:
+                devices, networks, clients = unifi_get(
+                    profile.url.rstrip("/"),
+                    username,
+                    password,
+                    site=profile.unifi_site,
+                    verify_tls=profile.verify_tls,
+                    timeout=profile.timeout,
+                )
+                built_devices, cables, vlans, prefixes, names = build_unifi(
+                    devices,
+                    networks,
+                    ctx.manual,
+                    site=profile.site,
+                    models={**ctx.manual.get("unifi_models", {}), **profile.models},
+                    vlan_names={
+                        **ctx.manual.get("unifi_vlan_names", {}),
+                        **{str(key): value for key, value in profile.vlan_names.items()},
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 - one controller must not block others
+                log.warning("UniFi profile %s failed: %s", profile.name, exc)
+                errors.append(exc)
+                continue
+            register_unifi_devices(ctx.resolver, devices, names)
+            state.unifi.append(
+                UnifiData(
+                    source=profile.name,
+                    site=profile.site,
+                    snmp_credential=profile.snmp_credential,
+                    devices=built_devices,
+                    vlans=vlans,
+                    prefixes=prefixes,
+                    cables=cables,
+                    names=names,
+                    clients=clients,
+                    raw_devices=devices,
+                )
             )
-        if not username or not password:
-            raise InventoryError("UniFi credentials are not configured")
-        devices, networks, clients = unifi_get(
-            options.unifi_url.rstrip("/"), username, password
-        )
-        built_devices, cables, vlans, prefixes, names = build_unifi(
-            devices, networks, ctx.manual
-        )
-        register_unifi_devices(ctx.resolver, devices, names)
-        state.unifi = UnifiData(
-            devices=built_devices,
-            vlans=vlans,
-            prefixes=prefixes,
-            cables=cables,
-            names=names,
-            clients=clients,
-            raw_devices=devices,
-        )
+        if errors and not state.unifi:
+            raise InventoryError(f"all UniFi profiles failed: {errors[-1]}")

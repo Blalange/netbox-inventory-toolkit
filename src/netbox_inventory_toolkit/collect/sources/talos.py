@@ -265,6 +265,7 @@ def resolve_talos_devices(
     *,
     talosctl: str | None,
     talosconfig: str | None,
+    cluster: str = "",
 ) -> dict[str, dict[str, Any]]:
     manual_by_node: dict[str, dict[str, Any]] = {}
     for node in nodes:
@@ -277,19 +278,36 @@ def resolve_talos_devices(
             if talosctl
             else {}
         )
-        refs: dict[str, set[str]] = {
-            "name": {name},
-            "talos_node": {name},
-        }
         serial = str(system_info.get("serialnumber") or "").strip()
         uuid = str(system_info.get("uuid") or "").strip()
-        if serial:
-            refs["service_tag"] = {serial}
-        if uuid:
-            refs["system_uuid"] = {uuid}
-        manual_device = resolver.resolve(refs, source="talos", label=name)
+        manual_device = None
+        if cluster:
+            composite_refs: dict[str, set[str]] = {
+                "talos_cluster_node": {f"{cluster}/{name}"}
+            }
+            if serial:
+                composite_refs["service_tag"] = {serial}
+            if uuid:
+                composite_refs["system_uuid"] = {uuid}
+            manual_device = resolver.resolve(
+                composite_refs, source="talos", label=f"{cluster}/{name}"
+            )
         if manual_device is None:
-            log.warning("Talos node %s has no manual device entry", name)
+            refs: dict[str, set[str]] = {
+                "name": {name},
+                "talos_node": {name},
+            }
+            if serial:
+                refs["service_tag"] = {serial}
+            if uuid:
+                refs["system_uuid"] = {uuid}
+            manual_device = resolver.resolve(refs, source="talos", label=name)
+        if manual_device is None:
+            log.warning(
+                "Talos node %s%s has no manual device entry",
+                f"{cluster}/" if cluster else "",
+                name,
+            )
             continue
         manual_by_node[name] = manual_device
         resolver.add_observation_claims(
@@ -306,16 +324,55 @@ class TalosSource(Source):
     name = "talos"
 
     def enabled(self, ctx: Any, state: SourceState) -> bool:
-        options = ctx.options
-        return bool(options.nodes_json or shutil.which(options.kubectl))
+        config = ctx.config
+        if config is None:
+            return False
+        return any(
+            profile.enabled
+            and (profile.nodes_json or shutil.which(profile.kubectl))
+            for profile in config.talos
+        )
 
     def collect(self, ctx: Any, state: SourceState) -> None:
-        options = ctx.options
-        nodes = read_nodes(options.kubectl, options.kubeconfig, options.nodes_json)
-        manual_by_node = resolve_talos_devices(
-            ctx.resolver,
-            nodes,
-            talosctl=options.talosctl,
-            talosconfig=options.talosconfig,
-        )
-        state.talos = TalosData(nodes=nodes, manual_by_node=manual_by_node)
+        config = ctx.config
+        if config is None:
+            return
+        errors: list[Exception] = []
+        for profile in config.talos:
+            if not profile.enabled:
+                continue
+            try:
+                nodes = read_nodes(
+                    profile.kubectl, profile.kubeconfig, profile.nodes_json
+                )
+                if not nodes and not profile.nodes_json and shutil.which(
+                    profile.kubectl
+                ) is None:
+                    raise OSError(
+                        f"{profile.kubectl!r} was not found for Talos profile "
+                        f"{profile.name!r}"
+                    )
+                manual_by_node = resolve_talos_devices(
+                    ctx.resolver,
+                    nodes,
+                    talosctl=profile.talosctl,
+                    talosconfig=profile.talosconfig,
+                    cluster=profile.name,
+                )
+            except Exception as exc:  # noqa: BLE001 - one cluster must not block others
+                log.warning("Talos profile %s failed: %s", profile.name, exc)
+                errors.append(exc)
+                continue
+            state.talos.append(
+                TalosData(
+                    source=profile.name,
+                    site=profile.site,
+                    config_dir=Path(profile.config_dir) if profile.config_dir else None,
+                    talosctl=profile.talosctl,
+                    talosconfig=profile.talosconfig,
+                    nodes=nodes,
+                    manual_by_node=manual_by_node,
+                )
+            )
+        if errors and not state.talos:
+            raise errors[-1]

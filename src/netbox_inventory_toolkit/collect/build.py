@@ -67,20 +67,26 @@ def build_servers(
     manual: dict[str, Any],
     switch_name: str = "",
     *,
+    default_site: str | None = None,
+    switches_by_site: dict[str, str] | None = None,
     module_types: dict[str, dict[str, Any]] | None = None,
     bmc_by_name: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict]:
-    clients_by_ip = {
-        str(client.get("ip")): client
-        for client in clients
-        if client.get("is_wired") and client.get("ip")
-    }
-    clients_by_mac = {
-        normalize_mac(client["mac"]): client
-        for client in clients
-        if client.get("is_wired") and client.get("mac")
-    }
-    site_slug = require_site(manual)
+    clients_by_ip: dict[str, list[dict]] = {}
+    clients_by_site_ip: dict[tuple[str, str], dict] = {}
+    clients_by_mac: dict[str, list[dict]] = {}
+    for client in clients:
+        if not client.get("is_wired"):
+            continue
+        ip = str(client.get("ip") or "")
+        site = str(client.get("_site") or "")
+        if ip:
+            clients_by_ip.setdefault(ip, []).append(client)
+            if site:
+                clients_by_site_ip[(site, ip)] = client
+        if client.get("mac"):
+            clients_by_mac.setdefault(normalize_mac(client["mac"]), []).append(client)
+    site_slug = default_site or require_site(manual)
     tag = default_tag(manual)
     servers: list[dict] = []
     catalog = module_types if module_types is not None else {}
@@ -89,11 +95,27 @@ def build_servers(
     for device in manual["devices"]:
         if device.get("talos_node") or str(device.get("role") or "") not in compute_roles(manual):
             continue
+        device_site = str(device.get("site") or site_slug)
         ip = str(device.get("unifi_ip") or "")
         claimed_mac = str(device.get("unifi_mac") or "")
-        client = clients_by_ip.get(ip) if ip else None
+        client = (
+            clients_by_site_ip.get((device_site, ip)) if ip and device_site else None
+        )
+        if client is None and ip:
+            candidates = clients_by_ip.get(ip) or []
+            if len(candidates) == 1:
+                client = candidates[0]
         if client is None and claimed_mac:
-            client = clients_by_mac.get(normalize_mac(claimed_mac))
+            candidates = clients_by_mac.get(normalize_mac(claimed_mac)) or []
+            same_site = [
+                item
+                for item in candidates
+                if not item.get("_site") or item.get("_site") == device_site
+            ]
+            if len(same_site) == 1:
+                client = same_site[0]
+            elif len(candidates) == 1:
+                client = candidates[0]
         if not ip and not client:
             continue
         if not ip and client:
@@ -159,7 +181,7 @@ def build_servers(
                     if str(uplink.get("port")) == str(port)
                 ),
                 "",
-            ) or switch_name
+            ) or (switches_by_site or {}).get(device_site, switch_name)
             link = f"{uplink_switch} Port {port}" if uplink_switch else f"Port {port}"
             description += f", {link}"
         if mac:
@@ -177,7 +199,7 @@ def build_servers(
 
         server: dict[str, Any] = {
             "name": name,
-            "site": str(device.get("site") or site_slug),
+            "site": device_site,
             "role": str(device.get("role") or "server"),
             "device_type": device_type,
             "status": status,
@@ -248,9 +270,11 @@ def build_servers(
 
 def build_nodes(
     nodes: list[dict],
-    talos_dir: Path,
+    talos_dir: Path | None,
     manual: dict[str, Any],
     *,
+    default_site: str | None = None,
+    cluster: str = "",
     talosctl: str | None = None,
     talosconfig: str | None = None,
     module_types: dict[str, dict[str, Any]] | None = None,
@@ -258,7 +282,7 @@ def build_nodes(
     manual_by_node: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict]:
     result: list[dict] = []
-    site_slug = require_site(manual)
+    site_slug = default_site or require_site(manual)
     tag = default_tag(manual)
     manual_devices = manual["devices"]
     manual_nodes = manual_by_node or {}
@@ -280,12 +304,20 @@ def build_nodes(
                 (
                     device
                     for device in manual_devices
-                    if device.get("talos_node") == name or device.get("name") == name
+                    if (not cluster or not device.get("talos_cluster") or device.get("talos_cluster") == cluster)
+                    and (
+                        device.get("talos_node") == name
+                        or device.get("name") == name
+                    )
                 ),
                 None,
             )
         if manual_device is None:
-            log.warning("Talos node %s has no manual device entry", name)
+            log.warning(
+                "Talos node %s%s has no manual device entry",
+                f"{cluster}/" if cluster else "",
+                name,
+            )
         device_name = str((manual_device or {}).get("name") or name)
 
         internal_ip = None

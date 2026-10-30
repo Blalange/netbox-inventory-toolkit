@@ -19,8 +19,29 @@ from .config import (
 from .context import CollectOptions
 from .log import configure_logging, get_logger
 from .pipeline import collect
+from .settings import find_settings_file
 
 log = get_logger(__name__)
+
+_DEPRECATED_FLAGS = {
+    "unifi_url": "--unifi-url",
+    "unifi_user": "--unifi-user",
+    "unifi_pass": "--unifi-pass",
+    "unifi_secret": "--unifi-secret",
+    "talos_config_dir": "--talos-config-dir",
+    "kubectl": "--kubectl",
+    "kubeconfig": "--kubeconfig",
+    "nodes_json": "--nodes-json",
+    "talosctl": "--talosctl",
+    "talosconfig": "--talosconfig",
+    "redfish_user": "--redfish-user",
+    "redfish_pass": "--redfish-pass",
+    "ipmi_user": "--ipmi-user",
+    "ipmi_pass": "--ipmi-pass",
+    "snmp_community": "--snmp-community",
+    "snmp_timeout": "--snmp-timeout",
+    "snmp_retries": "--snmp-retries",
+}
 
 
 def _split_no_sources(args: argparse.Namespace) -> set[str]:
@@ -38,6 +59,18 @@ def _split_no_sources(args: argparse.Namespace) -> set[str]:
     return disabled
 
 
+def _legacy_value(
+    args: argparse.Namespace,
+    attribute: str,
+    environment: str,
+    default: object = None,
+) -> object:
+    value = getattr(args, attribute)
+    if value is not None:
+        return value
+    return os.environ.get(environment, default)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Collect live inventory sources into the generated layer."
@@ -46,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--inventory",
         default=os.environ.get("INVENTORY_DIR", "inventory"),
         help="inventory root containing manual/, generated/ and images/ (default: inventory)",
+    )
+    parser.add_argument(
+        "--settings",
+        default=None,
+        help="collector settings.yml (default: COLLECTOR_SETTINGS or <inventory>/settings.yml)",
     )
     parser.add_argument(
         "--manual-dir",
@@ -59,7 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--sources",
-        default=os.environ.get("COLLECTOR_SOURCES", "auto"),
+        default=None,
         help="auto, all, none, or a comma-separated list of unifi,snmp,talos,redfish,ipmi",
     )
     parser.add_argument("--no-unifi", action="store_true", help="disable the UniFi source")
@@ -70,103 +108,103 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--unifi-url",
-        default=os.environ.get("UNIFI_URL"),
-        help="UniFi controller base URL (default: UNIFI_URL)",
+        default=None,
+        help="deprecated: configure sources.unifi[].url in settings.yml",
     )
     parser.add_argument(
         "--unifi-user",
-        default=os.environ.get("UNIFI_USER"),
-        help="UniFi username (default: UNIFI_USER)",
+        default=None,
+        help="deprecated: configure sources.unifi[].username in settings.yml",
     )
     parser.add_argument(
         "--unifi-pass",
-        default=os.environ.get("UNIFI_PASS"),
-        help="UniFi password (default: UNIFI_PASS)",
+        default=None,
+        help="deprecated: configure sources.unifi[].password in settings.yml",
     )
     parser.add_argument(
         "--unifi-secret",
-        default=os.environ.get("UNIFI_SECRET"),
-        help="read UniFi credentials from NAMESPACE/SECRET (default: UNIFI_SECRET)",
+        default=None,
+        help="deprecated: use from_k8s_secret in settings.yml",
     )
 
     parser.add_argument(
         "--talos-config-dir",
-        default=os.environ.get("TALOS_CONFIG_DIR"),
-        help="directory containing Talos node YAML files (optional)",
+        default=None,
+        help="deprecated: configure sources.talos[].config_dir in settings.yml",
     )
     parser.add_argument(
         "--kubectl",
-        default=os.environ.get("KUBECTL", "kubectl"),
-        help="kubectl binary used for node discovery (default: KUBECTL or kubectl)",
+        default=None,
+        help="deprecated: configure sources.talos[].kubectl in settings.yml",
     )
     parser.add_argument(
         "--kubeconfig",
-        default=os.environ.get("KUBECONFIG"),
-        help="kubeconfig passed to kubectl (default: KUBECONFIG)",
+        default=None,
+        help="deprecated: configure sources.talos[].kubeconfig in settings.yml",
     )
     parser.add_argument(
         "--nodes-json",
-        default=os.environ.get("NODES_JSON"),
-        help="use a saved 'kubectl get nodes -o json' file instead of the cluster",
+        default=None,
+        help="deprecated: configure sources.talos[].nodes_json in settings.yml",
     )
     parser.add_argument(
         "--talosctl",
-        default=os.environ.get("TALOSCTL"),
-        help="talosctl binary used for hardware discovery (default: TALOSCTL; omit to skip)",
+        default=None,
+        help="deprecated: configure sources.talos[].talosctl in settings.yml",
     )
     parser.add_argument(
         "--talosconfig",
-        default=os.environ.get("TALOSCONFIG"),
-        help="talosconfig passed to talosctl (default: TALOSCONFIG)",
+        default=None,
+        help="deprecated: configure sources.talos[].talosconfig in settings.yml",
     )
 
     parser.add_argument(
         "--redfish-user",
-        default=os.environ.get("REDFISH_USER", DEFAULT_REDFISH_USER),
-        help=f"Redfish username (default: REDFISH_USER or {DEFAULT_REDFISH_USER})",
+        default=None,
+        help="deprecated: configure sources.redfish[].username in settings.yml",
     )
     parser.add_argument(
         "--redfish-pass",
-        default=os.environ.get("REDFISH_PASS", DEFAULT_REDFISH_PASS),
-        help=f"Redfish password (default: REDFISH_PASS or {DEFAULT_REDFISH_PASS})",
+        default=None,
+        help="deprecated: configure sources.redfish[].password in settings.yml",
     )
     parser.add_argument(
         "--redfish-verify",
         action="store_true",
-        default=env_bool("REDFISH_VERIFY", False),
-        help="verify Redfish TLS certificates (default: REDFISH_VERIFY or false)",
+        default=None,
+        help="deprecated: configure sources.redfish[].verify_tls in settings.yml",
     )
     parser.add_argument(
         "--ipmi-user",
-        default=os.environ.get("IPMI_USER", DEFAULT_IPMI_USER),
-        help=f"IPMI username (default: IPMI_USER or {DEFAULT_IPMI_USER})",
+        default=None,
+        help="deprecated: configure sources.ipmi[].username in settings.yml",
     )
     parser.add_argument(
         "--ipmi-pass",
-        default=os.environ.get("IPMI_PASS", DEFAULT_IPMI_PASS),
-        help=f"IPMI password (default: IPMI_PASS or {DEFAULT_IPMI_PASS})",
+        default=None,
+        help="deprecated: configure sources.ipmi[].password in settings.yml",
     )
 
     parser.add_argument(
         "--snmp-community",
-        default=os.environ.get("SNMP_COMMUNITY", DEFAULT_SNMP_COMMUNITY),
-        help=f"SNMP v2c community (default: SNMP_COMMUNITY or {DEFAULT_SNMP_COMMUNITY})",
+        default=None,
+        help="deprecated: configure sources.snmp[].community in settings.yml",
     )
     parser.add_argument(
         "--snmp-timeout",
         type=float,
-        default=float(os.environ.get("SNMP_TIMEOUT", "2")),
-        help="SNMP timeout in seconds (default: 2)",
+        default=None,
+        help="deprecated: configure sources.snmp[].timeout in settings.yml",
     )
     parser.add_argument(
         "--snmp-retries",
         type=int,
-        default=int(os.environ.get("SNMP_RETRIES", "1")),
-        help="SNMP retry count (default: 1)",
+        default=None,
+        help="deprecated: configure sources.snmp[].retries in settings.yml",
     )
     parser.add_argument(
         "--snmp-report",
-        default=os.environ.get("SNMP_REPORT"),
+        default=None,
         help="write raw SNMP observations to a JSON report",
     )
 
@@ -175,10 +213,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--log-level",
-        default=os.environ.get("COLLECTOR_LOG_LEVEL", "INFO"),
+        default=None,
         type=str.upper,
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
-        help="logging threshold (default: COLLECTOR_LOG_LEVEL or INFO)",
+        help="logging threshold (default: COLLECTOR_LOG_LEVEL or settings.yml)",
     )
     parser.add_argument(
         "--log-file",
@@ -190,32 +228,93 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    configure_logging("DEBUG" if args.verbose else args.log_level, args.log_file)
+    early_level = (
+        "DEBUG"
+        if args.verbose
+        else args.log_level or os.environ.get("COLLECTOR_LOG_LEVEL", "INFO")
+    )
+    configure_logging(early_level, args.log_file)
+    inventory = Path(args.inventory)
+    settings_argument = args.settings or os.environ.get("COLLECTOR_SETTINGS")
+    try:
+        settings_path = find_settings_file(inventory, settings_argument)
+    except InventoryError as exc:
+        log.error("%s", exc)
+        return 2
+
+    used_deprecated = [
+        flag for attribute, flag in _DEPRECATED_FLAGS.items() if getattr(args, attribute)
+    ]
+    if args.redfish_verify is not None:
+        used_deprecated.append("--redfish-verify")
+    if settings_path is not None and used_deprecated:
+        log.error(
+            "%s cannot be combined with %s; move these values into settings.yml",
+            ", ".join(used_deprecated),
+            settings_path,
+        )
+        return 2
+    for flag in used_deprecated:
+        log.warning(
+            "%s is deprecated; configure it in settings.yml instead", flag
+        )
+    if settings_path is None:
+        log.warning(
+            "No collector settings file found; using deprecated CLI flags and "
+            "environment variables. Create %s to make runs reproducible.",
+            inventory / "settings.yml",
+        )
+
     options = CollectOptions(
-        inventory=Path(args.inventory),
+        inventory=inventory,
+        settings_path=settings_path,
         manual_dir=Path(args.manual_dir) if args.manual_dir else None,
         output_dir=Path(args.output_dir) if args.output_dir else None,
         sources_mode=args.sources,
         disabled_sources=_split_no_sources(args),
-        talos_config_dir=Path(args.talos_config_dir) if args.talos_config_dir else None,
-        kubectl=args.kubectl,
-        kubeconfig=args.kubeconfig,
-        nodes_json=args.nodes_json,
-        talosctl=args.talosctl,
-        talosconfig=args.talosconfig,
-        unifi_url=args.unifi_url,
-        unifi_user=args.unifi_user,
-        unifi_pass=args.unifi_pass,
-        unifi_secret=args.unifi_secret,
-        redfish_user=args.redfish_user,
-        redfish_pass=args.redfish_pass,
-        redfish_verify=args.redfish_verify,
-        ipmi_user=args.ipmi_user,
-        ipmi_pass=args.ipmi_pass,
-        snmp_community=args.snmp_community,
-        snmp_timeout=args.snmp_timeout,
-        snmp_retries=args.snmp_retries,
+        talos_config_dir=Path(str(_legacy_value(args, "talos_config_dir", "TALOS_CONFIG_DIR")))
+        if _legacy_value(args, "talos_config_dir", "TALOS_CONFIG_DIR")
+        else None,
+        kubectl=str(_legacy_value(args, "kubectl", "KUBECTL", "kubectl")),
+        kubeconfig=_legacy_value(args, "kubeconfig", "KUBECONFIG"),
+        nodes_json=_legacy_value(args, "nodes_json", "NODES_JSON"),
+        talosctl=_legacy_value(args, "talosctl", "TALOSCTL"),
+        talosconfig=_legacy_value(args, "talosconfig", "TALOSCONFIG"),
+        unifi_url=_legacy_value(args, "unifi_url", "UNIFI_URL"),
+        unifi_user=_legacy_value(args, "unifi_user", "UNIFI_USER"),
+        unifi_pass=_legacy_value(args, "unifi_pass", "UNIFI_PASS"),
+        unifi_secret=_legacy_value(args, "unifi_secret", "UNIFI_SECRET"),
+        redfish_user=str(
+            _legacy_value(
+                args, "redfish_user", "REDFISH_USER", DEFAULT_REDFISH_USER
+            )
+        ),
+        redfish_pass=str(
+            _legacy_value(
+                args, "redfish_pass", "REDFISH_PASS", DEFAULT_REDFISH_PASS
+            )
+        ),
+        redfish_verify=args.redfish_verify
+        if args.redfish_verify is not None
+        else env_bool("REDFISH_VERIFY", False),
+        ipmi_user=str(
+            _legacy_value(args, "ipmi_user", "IPMI_USER", DEFAULT_IPMI_USER)
+        ),
+        ipmi_pass=str(
+            _legacy_value(args, "ipmi_pass", "IPMI_PASS", DEFAULT_IPMI_PASS)
+        ),
+        snmp_community=str(
+            _legacy_value(
+                args, "snmp_community", "SNMP_COMMUNITY", DEFAULT_SNMP_COMMUNITY
+            )
+        ),
+        snmp_timeout=float(
+            _legacy_value(args, "snmp_timeout", "SNMP_TIMEOUT", 2.0)
+        ),
+        snmp_retries=int(_legacy_value(args, "snmp_retries", "SNMP_RETRIES", 1)),
         snmp_report=Path(args.snmp_report) if args.snmp_report else None,
+        log_level="DEBUG" if args.verbose else args.log_level,
+        log_file=Path(args.log_file) if args.log_file else None,
     )
     try:
         summary = collect(options)

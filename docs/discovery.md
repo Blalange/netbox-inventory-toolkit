@@ -51,8 +51,8 @@ By default, an explicit/CIDR scan also includes inventory locators. Use
 ### Protocols
 
 - **Redfish** probes `https://<ip>/redfish/v1` and reads the first system's
-  identity. Credentials are not sent unless `--redfish-auth` is set.
-  `REDFISH_VERIFY=true` enables certificate verification.
+  identity. With `settings.yml`, the matching `sources.redfish` profile is used.
+  In legacy mode credentials are not sent unless `--redfish-auth` is set.
 - **SNMP** reads `sysDescr`, `sysName`, `sysObjectID` and ENTITY-MIB serial and
   model. It requires the `snmp` extra (`pysnmp`).
 - **IPMI** reads FRU identity with `ipmitool`. Broad CIDR IPMI scans are
@@ -141,8 +141,20 @@ netbox-inventory-toolkit discover --inventory inventory \
 
 ## Credentials
 
-| Protocol | Variables / flags |
-|---|---|
-| Redfish | `REDFISH_USER`, `REDFISH_PASS`, `--redfish-auth`, `--redfish-verify` |
-| SNMP | `SNMP_COMMUNITY`, `--snmp-community` |
-| IPMI | `IPMI_USER`, `IPMI_PASS`, `--ipmitool`, `--ipmi-cidr-scan` |
+`discover` uses the same `settings.yml` profiles as `collect`:
+
+```sh
+netbox-inventory-toolkit discover --inventory inventory --scan-inventory
+```
+
+Each target is matched to the first applicable profile, or to the profile
+marked `default`. Unknown addresses in a CIDR scan use `match.cidrs` and then
+the default profile. Select one explicitly when needed:
+
+```sh
+netbox-inventory-toolkit discover --inventory inventory --scan-inventory \
+  --snmp-credential legacy --redfish-credential idrac6
+```
+
+Without `settings.yml`, the old `REDFISH_*`, `SNMP_*` and `IPMI_*` variables
+and flags are still accepted but log a deprecation warning.

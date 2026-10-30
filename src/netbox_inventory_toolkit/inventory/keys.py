@@ -12,7 +12,12 @@ from typing import Any
 
 from netbox_inventory_toolkit.inventory.util import normalize_address, normalize_prefix, slugify
 
-IGNORED_INVENTORY_FILES = {"kustomization.yaml", "kustomization.yml"}
+IGNORED_INVENTORY_FILES = {
+    "kustomization.yaml",
+    "kustomization.yml",
+    "settings.yaml",
+    "settings.yml",
+}
 
 
 def inventory_files(root: Path) -> list[Path]:

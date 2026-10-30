@@ -64,7 +64,7 @@ def test_read_redfish_discovers_standard_collections(monkeypatch) -> None:
         },
     }
 
-    def fake_get(_session, _base, path):
+    def fake_get(_session, _base, path, **kwargs):
         return responses.get(path)
 
     monkeypatch.setattr(redfish, "_redfish_get", fake_get)

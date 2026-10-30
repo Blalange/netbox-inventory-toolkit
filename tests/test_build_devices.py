@@ -121,3 +121,49 @@ def test_manual_only_server_gets_bmc_modules() -> None:
     assert len(server["module_bays"]) == 4
     assert len(server["modules"]) == 4
     assert "interfaces" not in server
+
+
+def test_build_nodes_uses_cluster_specific_manual_device() -> None:
+    from netbox_inventory_toolkit.collect.build import build_nodes
+
+    manual = {
+        "settings": {"site": "example", "roles": {"worker": "worker"}},
+        "devices": [
+            {
+                "name": "cluster-a-node1",
+                "site": "site-a",
+                "role": "worker",
+                "device_type": "generic-server",
+                "talos_cluster": "cluster-a",
+                "talos_node": "node1",
+            },
+            {
+                "name": "cluster-b-node1",
+                "site": "site-b",
+                "role": "worker",
+                "device_type": "generic-server",
+                "talos_cluster": "cluster-b",
+                "talos_node": "node1",
+            },
+        ],
+    }
+    node = {
+        "metadata": {"name": "node1", "labels": {}},
+        "status": {
+            "addresses": [{"type": "InternalIP", "address": "192.0.2.10"}],
+            "capacity": {"cpu": "4", "memory": "8Gi"},
+            "conditions": [{"type": "Ready", "status": "True"}],
+        },
+    }
+
+    result = build_nodes(
+        [node],
+        None,
+        manual,
+        default_site="example",
+        cluster="cluster-b",
+        manual_by_node={"node1": manual["devices"][1]},
+    )
+
+    assert result[0]["name"] == "cluster-b-node1"
+    assert result[0]["site"] == "site-b"

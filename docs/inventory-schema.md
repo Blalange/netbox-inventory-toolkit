@@ -42,9 +42,13 @@ Unknown root sections are rejected by the language server/sync validation.
 
 ## Settings
 
+Collector configuration now lives in `inventory/settings.yml`; see
+[configuration.md](configuration.md). The legacy `settings` block is still
+accepted as a fallback when no settings file exists:
+
 ```yaml
 settings:
-  site: example               # required when the collector creates devices
+  site: example
   default_tag: production
   rack: Rack 1
   talos_platform: talos-linux
@@ -55,12 +59,11 @@ settings:
     - server
   snmp:
     port_names: auto           # auto | port-number | ifname
-    auto_unifi: true           # poll active UniFi devices for SNMP enrichment
+    auto_unifi: true
 ```
 
-`unifi_models` (UniFi model code -> device-type slug) and
-`unifi_vlan_names` (VLAN ID -> corrected name) are also supported when the
-UniFi source is used.
+`unifi_models` and `unifi_vlan_names` are also legacy fallbacks; prefer
+`defaults.unifi_models` and `defaults.unifi_vlan_names` in `settings.yml`.
 
 ## Devices
 
@@ -95,10 +98,10 @@ Source-specific locators are optional:
 | Field | Source |
 |---|---|
 | `unifi_ip`, `unifi_mac`, `unifi_serial` | UniFi |
-| `talos_node` | Talos |
-| `redfish_ip`, `oob_ip` | Redfish |
-| `ipmi_ip` | IPMI |
-| `snmp_ip`, `snmp_interfaces`, `snmp_cables` | SNMP |
+| `talos_node`, `talos_cluster` | Talos / Kubernetes |
+| `redfish_ip`, `oob_ip`, `redfish_credential` | Redfish |
+| `ipmi_ip`, `ipmi_credential` | IPMI |
+| `snmp_ip`, `snmp_interfaces`, `snmp_cables`, `snmp_credential` | SNMP |
 
 The manual device is the identity registry. The collector matches observations
 by hardware identifiers first (service tag, system UUID, serial, MAC), then by

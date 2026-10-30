@@ -36,6 +36,11 @@ class DiscoveryOptions:
     ipmi_timeout: float = 5.0
     ipmi_binary: str = "ipmitool"
 
+    config: Any = None
+    snmp_credential: str | None = None
+    redfish_credential: str | None = None
+    ipmi_credential: str | None = None
+
     default_role: str = ""
     default_device_type: str = ""
 
@@ -65,6 +70,7 @@ class DeviceSnapshot:
     unifi_ip: str = ""
     unifi_mac: str = ""
     talos_node: str = ""
+    talos_cluster: str = ""
     description: str = ""
     tags: list[str] = field(default_factory=list)
     macs: set[str] = field(default_factory=set)
@@ -88,6 +94,8 @@ class InventorySnapshot:
 class ScanTarget:
     address: str
     source: str  # explicit, network, inventory
+    site: str = ""
+    device_name: str = ""
 
 
 @dataclass

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -172,7 +173,7 @@ def test_ipmi_only_builds_server_modules(monkeypatch, tmp_path: Path) -> None:
         "fans": [{"bay": "Fan 1", "name": "Fan 1", "rpm": 4000, "status": "active"}],
         "psus": [],
     }
-    monkeypatch.setattr(ipmi_source, "read_ipmi", lambda *args: payload)
+    monkeypatch.setattr(ipmi_source, "read_ipmi", lambda *args, **kwargs: payload)
     monkeypatch.setattr(ipmi_source.shutil, "which", lambda _binary: "/usr/bin/ipmitool")
     root = write_inventory(
         tmp_path / "inventory",
@@ -212,3 +213,137 @@ def test_explicit_unconfigured_source_is_an_error(tmp_path: Path) -> None:
     root = write_inventory(tmp_path / "inventory", [])
     with pytest.raises(InventoryError, match="not configured"):
         collect(options(root, "unifi"))
+
+
+def test_multiple_unifi_profiles_keep_sites_separate(monkeypatch, tmp_path: Path) -> None:
+    from netbox_inventory_toolkit.collect.sources import unifi as unifi_source
+
+    def fake_get(base, username, password, **kwargs):
+        suffix = "one" if base.endswith("one") else "two"
+        return (
+            [
+                {
+                    "mac": f"aa:bb:cc:dd:ee:{'01' if suffix == 'one' else '02'}",
+                    "name": f"switch-{suffix}",
+                    "type": "usw",
+                    "model": "US24PRO",
+                    "state": 1,
+                    "serial": f"S-{suffix}",
+                    "port_table": [],
+                }
+            ],
+            [],
+            [],
+        )
+
+    monkeypatch.setattr(unifi_source, "unifi_get", fake_get)
+    root = write_inventory(tmp_path / "inventory", [])
+    (root / "settings.yml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "defaults": {"site": "example"},
+                "sources": {
+                    "unifi": [
+                        {
+                            "name": "one",
+                            "url": "https://one",
+                            "site": "site-one",
+                            "username": "u",
+                            "password": "p",
+                        },
+                        {
+                            "name": "two",
+                            "url": "https://two",
+                            "site": "site-two",
+                            "username": "u",
+                            "password": "p",
+                        },
+                    ]
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    summary = collect(options(root, "unifi"))
+    network = load_generated(root, "network.yaml")
+
+    assert summary.network_devices == 2
+    sites = {device["name"]: device["site"] for device in network["devices"]}
+    assert sites == {"switch-one": "site-one", "switch-two": "site-two"}
+
+
+def test_multiple_talos_clusters_disambiguate_node_names(tmp_path: Path) -> None:
+    root = write_inventory(
+        tmp_path / "inventory",
+        [
+            {
+                "name": "cluster-a-node1",
+                "site": "site-a",
+                "role": "worker",
+                "device_type": "generic-server",
+                "talos_cluster": "cluster-a",
+                "talos_node": "node1",
+            },
+            {
+                "name": "cluster-b-node1",
+                "site": "site-b",
+                "role": "worker",
+                "device_type": "generic-server",
+                "talos_cluster": "cluster-b",
+                "talos_node": "node1",
+            },
+        ],
+    )
+    node = {
+        "metadata": {"name": "node1", "labels": {}},
+        "status": {
+            "addresses": [{"type": "InternalIP", "address": "192.0.2.10"}],
+            "capacity": {"cpu": "4", "memory": "8Gi"},
+            "conditions": [{"type": "Ready", "status": "True"}],
+        },
+    }
+    for cluster in ("a", "b"):
+        (root / f"nodes-{cluster}.json").write_text(
+            json.dumps({"items": [node]}), encoding="utf-8"
+        )
+    (root / "settings.yml").write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "defaults": {"site": "example"},
+                "sources": {
+                    "talos": [
+                        {
+                            "name": "cluster-a",
+                            "site": "site-a",
+                            "nodes_json": "nodes-a.json",
+                        },
+                        {
+                            "name": "cluster-b",
+                            "site": "site-b",
+                            "nodes_json": "nodes-b.json",
+                        },
+                    ]
+                },
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+
+    summary = collect(options(root, "talos"))
+    compute = load_generated(root, "compute.yaml")
+
+    assert summary.nodes == 2
+    assert {device["name"] for device in compute["devices"]} == {
+        "cluster-a-node1",
+        "cluster-b-node1",
+    }
+    sites = {device["name"]: device["site"] for device in compute["devices"]}
+    assert sites == {
+        "cluster-a-node1": "site-a",
+        "cluster-b-node1": "site-b",
+    }

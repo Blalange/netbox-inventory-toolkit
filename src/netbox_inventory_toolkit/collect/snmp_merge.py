@@ -25,12 +25,13 @@ _VIRTUAL_IF_RE = re.compile(
 
 def _ensure_vlan(
     vlans: list[dict[str, Any]],
-    by_vid: dict[int, dict[str, Any]],
+    by_vid: dict[tuple[str, int], dict[str, Any]],
     vid: int,
     name: str,
     site: str,
 ) -> None:
-    if vid in by_vid:
+    key = (site, vid)
+    if key in by_vid:
         return
     entry = {
         "vid": vid,
@@ -41,7 +42,7 @@ def _ensure_vlan(
         "sources": ["snmp"],
     }
     vlans.append(entry)
-    by_vid[vid] = entry
+    by_vid[key] = entry
 
 
 def _port_name(interface: dict[str, Any], mode: str = "auto") -> str:
@@ -116,7 +117,7 @@ def _vlan_fields(
     observation: dict[str, Any],
     snmp_interface: dict[str, Any],
     vlans: list[dict[str, Any]],
-    vlan_by_vid: dict[int, dict[str, Any]],
+    vlan_by_vid: dict[tuple[str, int], dict[str, Any]],
     site: str,
 ) -> dict[str, Any]:
     vlan_info = _if_vlan_info(observation, snmp_interface.get("if_index"))
@@ -152,7 +153,7 @@ def _vlan_fields(
 def _auto_interfaces(
     observation: dict[str, Any],
     vlans: list[dict[str, Any]],
-    vlan_by_vid: dict[int, dict[str, Any]],
+    vlan_by_vid: dict[tuple[str, int], dict[str, Any]],
     site: str,
     base_mac: str,
     mac_counts: Counter[str],
@@ -561,6 +562,7 @@ def merge_snmp_observations(
     *,
     cables: list[dict[str, Any]] | None = None,
     port_names: str | None = None,
+    default_site: str | None = None,
 ) -> dict[str, str]:
     """Apply SNMP data to generated device/interface/cable entries.
 
@@ -568,13 +570,16 @@ def merge_snmp_observations(
     device can opt in to full interface generation with ``snmp_interfaces`` and
     to cable discovery from LLDP/FDB with ``snmp_cables``.
     """
-    site = require_site(manual)
+    site = default_site or require_site(manual)
     tag_name = default_tag(manual)
     port_mode = port_names or snmp_port_names(manual)
     devices_by_name = {str(device.get("name")): device for device in devices}
-    vlan_by_vid = {
-        int(vlan["vid"]): vlan for vlan in vlans if vlan.get("vid") is not None
-    }
+    vlan_by_vid: dict[tuple[str, int], dict[str, Any]] = {}
+    for vlan in vlans:
+        if vlan.get("vid") is None:
+            continue
+        vlan_site = str(vlan.get("site") or site)
+        vlan_by_vid[(vlan_site, int(vlan["vid"]))] = vlan
     catalog = _combined_catalog(devices, manual)
     mac_index = _mac_index(catalog)
     matches: dict[str, str] = {}
@@ -608,6 +613,9 @@ def merge_snmp_observations(
                 {*(device.get("sources") or []), "snmp"}
             )
         manual_device = resolver.manual_by_name.get(name) or {}
+        observation_site = str(
+            observation.get("site") or manual_device.get("site") or site
+        )
         mac_counts = Counter(
             str(interface.get("mac"))
             for interface in observation.get("interfaces", [])
@@ -620,7 +628,7 @@ def merge_snmp_observations(
                 device = _new_device(
                     name,
                     manual_device,
-                    site,
+                    observation_site,
                     default_tag_name=tag_name,
                 )
                 devices.append(device)
@@ -629,7 +637,7 @@ def merge_snmp_observations(
                 observation,
                 vlans,
                 vlan_by_vid,
-                site,
+                observation_site,
                 base_mac,
                 mac_counts,
                 port_mode,
@@ -757,7 +765,7 @@ def merge_snmp_observations(
                         vlan_by_vid,
                         vid,
                         observation.get("vlans", {}).get(vid, ""),
-                        site,
+                        observation_site,
                     )
                 if untagged:
                     update["untagged_vlan"] = untagged[0]
@@ -783,7 +791,7 @@ def merge_snmp_observations(
             device = _new_device(
                 name,
                 manual_device,
-                site,
+                observation_site,
                 default_tag_name=tag_name,
             )
             devices.append(device)

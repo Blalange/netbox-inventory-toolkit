@@ -1,0 +1,16 @@
+version: 1
+
+defaults:
+  site: example
+
+sources:
+  snmp:
+    - name: default
+      community: {from_env: SNMP_COMMUNITY, default: public}
+      default: true
+
+  ipmi:
+    - name: default
+      username: {from_env: IPMI_USER, default: root}
+      password: {from_env: IPMI_PASS, default: calvin}
+      default: true

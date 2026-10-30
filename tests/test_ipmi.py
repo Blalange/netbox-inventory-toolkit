@@ -134,7 +134,7 @@ def test_read_ipmi_combines_fru_and_sensor_data(monkeypatch) -> None:
         ]
     )
     monkeypatch.setattr(ipmi.shutil, "which", lambda name: "/usr/bin/ipmitool")
-    monkeypatch.setattr(ipmi, "_run", lambda *args: next(outputs))
+    monkeypatch.setattr(ipmi, "_run", lambda *args, **kwargs: next(outputs))
 
     data = ipmi.read_ipmi("192.168.4.60", "readonly", "readonly")
 
@@ -156,7 +156,7 @@ def test_collect_ipmi_maps_result_to_manual_device(monkeypatch) -> None:
         "fans": [{"bay": "Fan1", "name": "Fan1 RPM", "rpm": 4560, "status": "active"}],
         "psus": [],
     }
-    monkeypatch.setattr("netbox_inventory_toolkit.collect.sources.ipmi.read_ipmi", lambda *args: payload)
+    monkeypatch.setattr("netbox_inventory_toolkit.collect.sources.ipmi.read_ipmi", lambda *args, **kwargs: payload)
     manual = {
         "devices": [
             {

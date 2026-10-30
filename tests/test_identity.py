@@ -48,6 +48,37 @@ def test_conflicting_ip_and_service_tag_is_an_error() -> None:
         )
 
 
+def test_talos_cluster_disambiguates_repeated_node_names() -> None:
+    resolver = DeviceResolver(
+        {
+            "devices": [
+                {
+                    "name": "cluster-a-node1",
+                    "talos_cluster": "cluster-a",
+                    "talos_node": "node1",
+                },
+                {
+                    "name": "cluster-b-node1",
+                    "talos_cluster": "cluster-b",
+                    "talos_node": "node1",
+                },
+            ]
+        }
+    )
+    device_a = resolver.resolve(
+        {"talos_cluster_node": {"cluster-a/node1"}},
+        source="talos",
+        label="cluster-a/node1",
+    )
+    device_b = resolver.resolve(
+        {"talos_cluster_node": {"cluster-b/node1"}},
+        source="talos",
+        label="cluster-b/node1",
+    )
+    assert device_a is not None and device_a["name"] == "cluster-a-node1"
+    assert device_b is not None and device_b["name"] == "cluster-b-node1"
+
+
 def test_observation_hardware_claim_can_resolve_later_source() -> None:
     resolver = DeviceResolver(
         {"devices": [{"name": "server110", "redfish_ip": "192.168.4.99"}]}
